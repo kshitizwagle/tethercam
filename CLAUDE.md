@@ -21,10 +21,16 @@ no overlays. GPL-3.0.
   Apple/Microsoft docs and permissively licensed references only (see CONTRIBUTING.md).
 - Windows: C++20, CMake, MSVC, WIL for RAII, no exceptions across COM boundaries. `windows/common` stays
   free of COM/MF so it can be unit-tested.
-- iOS: Swift 6 strict concurrency, XcodeGen (`ios/project.yml`); never commit the generated `.xcodeproj`.
+- iOS: Swift 5 mode + strict-concurrency warnings, XcodeGen (`ios/project.yml`); never commit the generated `.xcodeproj`.
 - The vcam DLL runs inside the FrameServer service as LocalService. It must not block, throw, write files,
   or trust shared-memory contents without validating them.
 - The iOS app can't be built on the Windows PC. Leave iOS work clearly marked for the Mac.
+
+## Testing without an iPhone
+- `fakephone` simulates the device over TCP; run the agent with `--tcp 127.0.0.1:5321`.
+- `vcamcheck direct --dll <tethercam-vcam.dll>` loads the camera in-process; set
+  `TETHERCAM_SHM_NAMESPACE=Local` for both it and the agent.
+- Registering the real camera needs admin: `windows/scripts/dev-install.ps1` (elevated) or the MSI.
 
 ## Build
 ```

@@ -1,0 +1,185 @@
+import AVFoundation
+import Foundation
+
+/// Owns the AVCaptureSession: lens discovery, capabilities, format selection, and frame delivery
+/// (TECH_SPEC §5). All configuration happens on `sessionQueue`; frames arrive on `videoQueue`.
+final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "tethercam.camera")
+    private let videoQueue = DispatchQueue(label: "tethercam.video", qos: .userInteractive)
+    private let output = AVCaptureVideoDataOutput()
+    private var input: AVCaptureDeviceInput?
+    private var devices: [UInt8: AVCaptureDevice] = [:]
+    private(set) var cameras: [CameraInfo] = []
+    private var mirror = false
+    private var rotation: UInt16 = 0
+
+    /// Called on `videoQueue` for every captured frame.
+    var onFrame: ((CMSampleBuffer) -> Void)?
+
+    static let maxWidth: UInt16 = 3840
+    static let maxHeight: UInt16 = 2160
+
+    override init() {
+        super.init()
+        discover()
+    }
+
+    // MARK: Discovery
+
+    private func discover() {
+        let types: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .builtInUltraWideCamera, .builtInTelephotoCamera]
+        let found = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: .unspecified).devices
+        var id: UInt8 = 0
+        // Back cameras first (wide, ultra wide, tele), then front.
+        let order: [(AVCaptureDevice.Position, AVCaptureDevice.DeviceType, Lens, String)] = [
+            (.back, .builtInWideAngleCamera, .wide, "Back Wide"),
+            (.back, .builtInUltraWideCamera, .ultraWide, "Back Ultra Wide"),
+            (.back, .builtInTelephotoCamera, .telephoto, "Back Telephoto"),
+            (.front, .builtInWideAngleCamera, .front, "Front"),
+        ]
+        for (position, type, lens, label) in order {
+            guard let device = found.first(where: { $0.position == position && $0.deviceType == type }) else { continue }
+            let formats = Self.videoFormats(of: device)
+            guard !formats.isEmpty else { continue }
+            devices[id] = device
+            cameras.append(CameraInfo(id: id, position: position == .front ? .front : .back, lens: lens,
+                                      label: label, formats: formats))
+            id += 1
+        }
+    }
+
+    /// Unique 8-bit 4:2:0 video sizes with their highest frame rate (capped at 60), largest first.
+    static func videoFormats(of device: AVCaptureDevice) -> [VideoFormat] {
+        var best: [String: VideoFormat] = [:]
+        for format in device.formats {
+            let subtype = CMFormatDescriptionGetMediaSubType(format.formatDescription)
+            guard subtype == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                || subtype == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange else { continue }
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            guard dims.width > 0, dims.height > 0, dims.width <= Int32(maxWidth), dims.height <= Int32(maxHeight) else { continue }
+            let maxRate = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+            let fps = UInt16(min(60, maxRate.rounded(.down)))
+            guard fps >= 15 else { continue }
+            let key = "\(dims.width)x\(dims.height)"
+            let candidate = VideoFormat(width: UInt16(dims.width), height: UInt16(dims.height), maxFps: fps)
+            if let existing = best[key], existing.maxFps >= fps { continue }
+            best[key] = candidate
+        }
+        return best.values.sorted { Int($0.width) * Int($0.height) > Int($1.width) * Int($1.height) }
+    }
+
+    // MARK: Configuration
+
+    /// Selects lens and format and starts capturing. Completion runs on the session queue.
+    func start(cameraId: UInt8, width: UInt16, height: UInt16, fps: UInt16, completion: @escaping (Bool) -> Void) {
+        sessionQueue.async { [self] in
+            completion(configure(cameraId: cameraId, width: width, height: height, fps: fps))
+        }
+    }
+
+    func stop() {
+        sessionQueue.async { [self] in
+            if session.isRunning { session.stopRunning() }
+        }
+    }
+
+    /// Restarts capture after an interruption (e.g. the app returned to the foreground).
+    func resume() {
+        sessionQueue.async { [self] in
+            if input != nil, !session.isRunning { session.startRunning() }
+        }
+    }
+
+    func setOptions(mirror: Bool, rotation: UInt16) {
+        sessionQueue.async { [self] in
+            self.mirror = mirror
+            self.rotation = rotation
+            applyConnectionOptions()
+        }
+    }
+
+    private func configure(cameraId: UInt8, width: UInt16, height: UInt16, fps: UInt16) -> Bool {
+        guard let device = devices[cameraId] ?? devices.values.first else { return false }
+        guard let format = Self.bestFormat(device: device, width: width, height: height, fps: fps) else { return false }
+
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+        session.sessionPreset = .inputPriority
+        if input?.device != device {
+            if let old = input { session.removeInput(old) }
+            guard let newInput = try? AVCaptureDeviceInput(device: device), session.canAddInput(newInput) else { return false }
+            session.addInput(newInput)
+            input = newInput
+        }
+        if !session.outputs.contains(output) {
+            output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
+            output.alwaysDiscardsLateVideoFrames = true
+            output.setSampleBufferDelegate(self, queue: videoQueue)
+            guard session.canAddOutput(output) else { return false }
+            session.addOutput(output)
+        }
+        do {
+            try device.lockForConfiguration()
+            device.activeFormat = format
+            let duration = CMTime(value: 1, timescale: CMTimeScale(fps))
+            device.activeVideoMinFrameDuration = duration
+            device.activeVideoMaxFrameDuration = duration
+            if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+            if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+            device.unlockForConfiguration()
+        } catch {
+            return false
+        }
+        applyConnectionOptions()
+        if !session.isRunning {
+            // startRunning must not be called inside begin/commitConfiguration.
+            sessionQueue.async { [self] in session.startRunning() }
+        }
+        return true
+    }
+
+    private func applyConnectionOptions() {
+        guard let connection = output.connection(with: .video) else { return }
+        if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
+        if connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = mirror
+        }
+        if #available(iOS 17.0, *) {
+            let angle = CGFloat(rotation)
+            if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        } else if connection.isVideoOrientationSupported {
+            switch rotation {
+            case 90: connection.videoOrientation = .portrait
+            case 180: connection.videoOrientation = .landscapeLeft
+            case 270: connection.videoOrientation = .portraitUpsideDown
+            default: connection.videoOrientation = .landscapeRight
+            }
+        }
+    }
+
+    static func bestFormat(device: AVCaptureDevice, width: UInt16, height: UInt16, fps: UInt16) -> AVCaptureDevice.Format? {
+        let matches = device.formats.filter { format in
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let subtype = CMFormatDescriptionGetMediaSubType(format.formatDescription)
+            return dims.width == Int32(width) && dims.height == Int32(height)
+                && (subtype == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                    || subtype == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
+                && format.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= Double(fps) && Double(fps) <= $0.maxFrameRate }
+        }
+        // Prefer video range and formats without binning or HDR extras.
+        return matches.sorted { a, b in
+            let av = CMFormatDescriptionGetMediaSubType(a.formatDescription) == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            let bv = CMFormatDescriptionGetMediaSubType(b.formatDescription) == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            if av != bv { return av }
+            return !a.isVideoBinned && b.isVideoBinned
+        }.first
+    }
+
+    // MARK: AVCaptureVideoDataOutputSampleBufferDelegate
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        onFrame?(sampleBuffer)
+    }
+}

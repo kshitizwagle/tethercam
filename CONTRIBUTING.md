@@ -26,7 +26,7 @@ if any code is adapted.
 - **C++ (Windows):** C++20, MSVC, CMake. `clang-format` (repo `.clang-format`, based on LLVM style with
   4-space indent and a 110-column limit). Use RAII for every handle (`wil` or small local wrappers). No
   exceptions across COM boundaries; return `HRESULT`.
-- **Swift (iOS):** Swift 6 language mode with strict concurrency. Keep capture and encoding off the main
+- **Swift (iOS):** Swift 5 language mode with strict-concurrency warnings (Swift 6 mode is an M8 item). Keep capture and encoding off the main
   actor. `swift-format` defaults.
 - Keep the wire protocol in [docs/PROTOCOL.md](docs/PROTOCOL.md) and the code in sync. A protocol change
   bumps the version and updates the doc in the same PR.

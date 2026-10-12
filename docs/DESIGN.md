@@ -64,95 +64,119 @@ the 250 ms budget it sets `dropUntilKeyframe`, skips frames, and forces an IDR.
 
 ## Windows agent internals
 
-**Threads:**
+**Threads (as built in v0.1):**
 
 | Thread | Job |
 |---|---|
-| UI thread | Message loop, tray icon, menu, `WM_DEVICECHANGE`-free (hot-plug comes from usbmuxd `Listen`) |
-| `MuxWatcher` | Blocking socket on the usbmuxd `Listen` connection; posts Attached/Detached |
-| `SessionThread` | Owns the device socket: reads frames, sends control, heartbeats (select with 1 s timeout) |
-| `DecodeThread` | Bounded queue (max 4 access units, drop-oldest-non-key) → MF decoder → scaler → shm writer |
-| `ControlWatcher` | Waits on `Global\Tethercam.Control.v1` / polls for the mapping; turns consumer state into session commands |
+| UI thread | Message loop, tray icon and menu (`agent/tray.cpp`). Refreshed by `PostMessage` from the engine |
+| Engine thread | `agent/engine.cpp`: device discovery, the protocol session, H.264 decode, scaling and the shm writer, all in one loop that polls the socket every 20 ms |
 
-Threads talk to each other through small locked queues and a central `AgentState` (mutex + condition
-variable). No thread blocks the UI thread.
+v0.1 decodes on the session thread: the hardware decoder returns in a few milliseconds and TCP buffers
+absorb short stalls, so a separate decode thread wasn't needed yet (revisit if 4K60 profiling says so).
+Hot-plug is handled by polling `ListDevices` once a second instead of a usbmuxd `Listen` socket; the
+`Listen` client exists in `common/usbmux` for later. Settings from the tray (lens, mirror, rotation) reach
+the engine through atomics and a mutex-protected `Snapshot`.
 
 **Agent state machine:**
 
 ```
-NoDevice ─Attached─▶ DeviceFound ─Connect ok─▶ Connected(Ready) ─consumer active─▶ Streaming
-   ▲  ▲                 │ result 3 (app closed): retry 1 s          │ consumer gone 2 s → Stop
-   │  └── Detached ─────┴──────────────── socket error / 3 s silence ┘
+NoUsbmuxd ◀── usbmuxd unreachable (retry 1 s)
+NoDevice ─USB device listed─▶ Connect ─refused─▶ AppNotOpen (retry 1 s)
+                                 │ ok
+                                 ▼
+                         Connected(Ready) ─consumer active─▶ Streaming
+                                 ▲                              │ consumer gone 2 s → Stop
+                                 └──────────────────────────────┘
+any state ── socket error / 3 s silence ──▶ reconnect
+Streaming ── Error(CAMERA_UNAVAILABLE) ──▶ PausedOnPhone (until the next VideoConfig)
 ```
 
-The tray icon has 4 states: grey (no device), amber (device found, app not open), green (connected),
-green + dot (streaming).
+The tray icon has 4 states: grey (no device), amber (app not open, paused, or Apple Devices missing),
+green (connected), green with a white dot (streaming).
 
-**Decoder pipeline:**
+**Decoder pipeline (`media/src/media.cpp`):**
 
-1. `MFStartup`, D3D11 device (`D3D11_CREATE_DEVICE_VIDEO_SUPPORT`), `IMFDXGIDeviceManager`.
-2. H.264 decoder MFT with the D3D manager, input type `MFVideoFormat_H264`, output `NV12`.
-3. Each access unit becomes one `IMFSample` (Annex-B data; the parameter sets from `VideoConfig` are
-   prepended before every IDR).
-4. On `MF_E_TRANSFORM_STREAM_CHANGE`, renegotiate the output type.
-5. If the output size ≠ the target size: Video Processor MFT (GPU) NV12→NV12 scale with letterbox.
-6. `CopyResource` to a staging texture, `Map`, copy row by row into the shm slot (respecting both pitches).
+1. D3D11 device (`D3D11_CREATE_DEVICE_VIDEO_SUPPORT`) + `IMFDXGIDeviceManager`; falls back to software
+   decoding if the MFT isn't D3D11-aware or the device can't be created.
+2. Microsoft H.264 decoder MFT, `CODECAPI_AVLowLatencyMode`, input `MFVideoFormat_H264`, output `NV12`.
+3. Each access unit becomes one `IMFSample`; the parameter sets from `VideoConfig` are prepended to IDRs.
+4. On `MF_E_TRANSFORM_STREAM_CHANGE`, renegotiate NV12 and re-read the coded size (e.g. 1920×1088) and
+   display aperture (1920×1080).
+5. Frames are read with `IMF2DBuffer::Lock2D` (works for both GPU and memory buffers).
+6. If the decoded size ≠ the consumer's size: CPU bilinear scale with letterbox (`common/image`). A GPU
+   Video Processor path is a later optimization (TECH_SPEC R7).
+7. `shm::WriteFrame` copies row by row into the next slot.
 
 ## Shared memory layout
 
-All fields are little-endian and naturally aligned. Version 1:
+Defined in `windows/common/include/tethercam/shm.h`. Little-endian, naturally aligned, version 1:
 
 ```c
-struct TcamShmHeader {            // at offset 0, 4096 bytes reserved
-    uint32_t magic;               // 'TCSH'
-    uint32_t version;             // 1
-    uint32_t header_size;         // 4096
-    uint32_t slot_count;          // 3
-    uint64_t slot_offset[3];      // from start of mapping, 4096-aligned
-    uint64_t slot_capacity;       // bytes per slot (4K NV12 = 3840*2160*3/2)
+struct Header {                  // offset 0, 4096 bytes reserved
+    uint32_t magic;              // 'TCSH'
+    uint32_t version;            // 1
+    uint32_t header_size;        // 4096
+    uint32_t slot_count;         // 3
+    uint64_t slot_offset[3];     // from start of mapping, 4096-aligned
+    uint64_t slot_capacity;      // bytes per slot (64 + 4K NV12, rounded to 4096)
 
-    // written by vcam (consumer side)
-    volatile uint32_t consumer_active;   // 0/1
+    // written by the vcam (consumer side)
+    uint32_t consumer_active;    // 0/1
     uint32_t req_width, req_height, req_fps;
-    volatile uint32_t control_seq;       // bumped on every change
+    uint32_t control_seq;        // bumped on every change
+    uint32_t reserved0;
 
-    // written by agent (producer side)
-    volatile uint64_t agent_heartbeat_qpc;
-    volatile uint32_t agent_pid;
-    volatile uint32_t latest_slot;       // index of newest complete frame, 0xFFFFFFFF = none
-    uint32_t agent_status;               // enum mirrored in the placeholder text
+    // written by the agent (producer side)
+    uint64_t agent_heartbeat_ms; // GetTickCount64() of the last update
+    uint32_t agent_pid;
+    uint32_t latest_slot;        // newest complete frame, 0xFFFFFFFF = none
+    uint32_t agent_status;       // AgentStatus enum, drives the placeholder text
+    uint32_t reserved1;
+
+    char vcam_message[256];      // vcam's last status line; the agent copies it into its log
 };
 
-struct TcamSlotHeader {           // at the start of each slot, 64 bytes
-    volatile uint32_t seq;        // seqlock: odd while being written
-    uint32_t width, height, stride_y, stride_uv;
-    uint64_t pts_qpc;             // agent QPC at decode output
+struct SlotHeader {              // start of each slot, 64 bytes
+    uint32_t seq;                // seqlock: odd while being written
+    uint32_t width, height, stride;
+    uint64_t pts_100ns;
     uint64_t frame_number;
-};                                // NV12 data follows at +64
+};                               // NV12 data follows at +64 (Y plane, then interleaved UV)
 ```
 
-**Writer (agent):** choose the slot that is neither `latest_slot` nor the one the reader is likely on
-(round-robin over 3), `seq++` (odd), copy, `seq++` (even), `latest_slot = i`, `SetEvent(FrameReady)`.
-**Reader (vcam):** read `latest_slot`, read `seq` (must be even), copy, re-read `seq`. If it changed,
-retry once, then use the previous frame. Use `std::atomic_ref` with acquire/release ordering.
+**Writer (agent):** next slot = `(latest_slot + 1) % 3`; `seq |= 1` (odd), release fence, copy, `seq + 1`
+(even, release), `latest_slot = i`, `SetEvent(FrameReady)`.
+**Reader (vcam):** read `latest_slot`, read `seq` (acquire; must be even), copy, acquire fence, re-read
+`seq`. If it changed, retry once, then fall back to the previous frame. All shared fields go through
+`std::atomic_ref`. A unit test hammers this with a concurrent writer and checks no frame is ever torn.
 
-Staleness: if `agent_heartbeat_qpc` is older than 1 s or the newest frame is older than 500 ms, the vcam
-shows the placeholder (with text matching `agent_status`).
+Staleness: if `agent_heartbeat_ms` is older than 1.5 s, or no new frame number arrived for 750 ms, the vcam
+shows the placeholder for `agent_status`.
+
+**Namespace:** objects are named `Global\Tethercam.*.v1`. For development without a registered camera,
+`TETHERCAM_SHM_NAMESPACE=Local` switches both sides to the session namespace (used with
+`vcamcheck direct`).
 
 ## Virtual camera internals
 
-- `DllGetClassObject` → class factory → `Activator`. FrameServer calls `ActivateObject` → `MediaSource`.
-- `MediaSource::Start` makes sure the mapping exists (creating it if needed), sets `consumer_active = 1`
-  and the requested type, signals Control, starts the stream and queues `MEStreamStarted`.
-- `MediaStream::RequestSample` runs on the FrameServer work queue. It must never block for long: take a
-  frame if one is there, otherwise the previous frame or the placeholder. Frame pacing comes from the
-  consumer's requests, so we don't run our own timer.
-- `Stop`/`Shutdown` set `consumer_active = 0`. Several consumers share one source through Frame Server
+- `DllGetClassObject` (WRL `Module<InProc>`) → `Activator` (`IMFActivate` + forwarded `IMFAttributes`).
+  Frame Server calls `ActivateObject` → `MediaSource`.
+- `MediaSource` (`IMFMediaSourceEx`, `IMFGetService`, `IKsControl`, `IMFSampleAllocatorControl`) owns one
+  `MediaStream` (`IMFMediaStream2`, `IKsControl`) with the 10 NV12 media types from
+  `AdvertisedFormats()`. `IKsControl` answers `ERROR_SET_NOT_FOUND` for everything.
+- `MediaSource::Start` reads the consumer's chosen media type from the presentation descriptor, queues
+  `MENewStream`/`MEUpdatedStream`, starts the stream (which publishes `consumer_active` and the size to
+  shm and signals Control) and queues `MESourceStarted`.
+- `MediaStream::RequestSample` paces delivery to the negotiated frame rate with a high-resolution waitable
+  timer (Frame Server asks for the next sample immediately), allocates from the Frame Server allocator
+  when one is provided (`MFSampleAllocatorUsage_UsesProvidedAllocator`), else a 2D memory buffer, fills it
+  with a live frame or the placeholder, timestamps it with `MFGetSystemTime()` and queues `MEMediaSample`.
+- `Stop`/`Shutdown` clear `consumer_active`. Several consumers share one source through Frame Server
   (`MF_DEVICESTREAM_FRAMESERVER_SHARED`).
-- Every COM method is guarded: no exceptions escape, `MF_E_SHUTDOWN` after shutdown, and a critical
-  section per object.
-- Logging: ETW TraceLogging provider `Tethercam.VCam` (no files, since LocalService can't write to user
-  folders). Read the logs with `tracelog`/WPR or `tracefmt` during development.
+- Lock order is source → stream; `GetEvent` (which can block) never runs under a lock; `Shutdown` breaks
+  the source ↔ stream reference cycle.
+- Logging: `OutputDebugString` (view with DebugView) plus `vcam_message` in shared memory, which the agent
+  copies into its log. LocalService can't write to user folders.
 
 ## Error handling
 

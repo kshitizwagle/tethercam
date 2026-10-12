@@ -222,9 +222,9 @@ polls for it every 500 ms, so it's idle exactly when no consumer exists.
 
 | Risk | Impact | Mitigation / spike |
 |---|---|---|
-| R1 Global shared-memory permissions between FrameServer (session 0) and the user agent | Blocks the architecture | M1 spike. Fallback: the agent registers a tiny companion Windows service that brokers the section, or frames go over a named pipe |
-| R2 FrameServer can't load the DLL (path ACLs, COM registration, signing) | Camera doesn't appear | M1 spike with a static-pattern source; install under Program Files; check with Event Viewer → Camera Frame Server logs |
-| R3 Apple Devices app (Store) doesn't expose usbmuxd on 27015 the same way iTunes does | No transport | M1 spike on both installs; document which one is required |
+| R1 Global shared-memory permissions between FrameServer (session 0) and the user agent | Blocks the architecture | M1 spike. Fallback: the agent registers a tiny companion Windows service that brokers the section, or frames go over a named pipe. **2026-10-12:** the DACL needs `GX` for interactive users (SYNCHRONIZE on the events); fixed and verified in the session namespace. Cross-session (`Global\`) still to verify with the camera registered |
+| R2 FrameServer can't load the DLL (path ACLs, COM registration, signing) | Camera doesn't appear | M1 spike with a static-pattern source; install under Program Files; check with Event Viewer → Camera Frame Server logs. **2026-10-12:** a per-user (HKCU) COM registration is not enough: `IMFVirtualCamera::Start` fails with `0x80070003`. Machine-wide (HKLM) registration, i.e. admin, is required (the MSI does this) |
+| R3 Apple Devices app (Store) doesn't expose usbmuxd on 27015 the same way iTunes does | No transport | **Resolved 2026-10-12:** Apple Devices 1.1540 (`AppleMobileDeviceProcess.exe`) serves the usbmuxd plist protocol on 127.0.0.1:27015; `ListDevices` works. Note: a phone that isn't trusted/unlocked shows up only as `ConnectionType=Network` |
 | R4 Some apps reject NV12-only cameras | Missing in some apps | Also offer YUY2 (CPU conversion) if testing shows a need |
 | R5 Thermal throttling at 4K60 | Dropped fps | Thermal policy (§5); recommend a phone holder without a case; measure in M5 |
 | R6 iOS kills capture when the screen locks or the app is backgrounded | Video stops | Keep the screen on, dim the preview; clear "Paused on iPhone" placeholder; fast resume |
@@ -235,7 +235,7 @@ polls for it every 500 ms, so it's idle exactly when no consumer exists.
 | # | Question | Plan to answer |
 |---|---|---|
 | Q1 | Does a usbmuxd-tunnelled connection reach an `NWListener` bound to 127.0.0.1 on the device? | M1 echo spike |
-| Q2 | Is `MFVirtualCameraAccess_AllUsers` + `Lifetime_System` the right combination, or should each user register their own? | M1 vcam spike |
+| Q2 | Is `MFVirtualCameraAccess_AllUsers` + `Lifetime_System` the right combination, or should each user register their own? | Partly answered: per-user COM registration fails (see R2), so the MSI registers machine-wide with AllUsers + System lifetime. Confirm on an elevated install |
 | Q3 | Which media type does each target app (Teams, Zoom, Chrome, OBS) actually pick from our list? | M4 compatibility matrix |
-| Q4 | Can the agent change the stream size mid-session without the consumer re-opening the camera, e.g. on a lens switch with a different max size? | M5. Default answer: always keep the consumer's size and scale |
+| Q4 | Can the agent change the stream size mid-session without the consumer re-opening the camera, e.g. on a lens switch with a different max size? | **Answered by design:** the agent always delivers the consumer's size and scales/letterboxes whatever the phone sends (implemented) |
 | Q5 | Can App Store distribution happen without a paid developer account? (Not needed for development: free accounts can sideload for 7 days.) | Before M7 |

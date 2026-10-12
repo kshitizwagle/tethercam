@@ -1,0 +1,69 @@
+<!--
+  Tethercam MSI (WiX v5). Build with windows/installer/build.ps1.
+  Installs to Program Files (readable by the FrameServer service's LocalService account),
+  registers the virtual camera with the agent (install switch), and starts the agent at login.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Tethercam"
+           Manufacturer="Tethercam contributors"
+           Version="$(var.Version)"
+           UpgradeCode="3F0C1C7A-5C55-4B8A-9F0E-6A2D7C1B9E41"
+           Scope="perMachine"
+           Compressed="yes">
+    <SummaryInformation Description="Use your iPhone as a webcam over USB" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Tethercam is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Launch Condition="Installed OR VersionNT64 AND WindowsBuild &gt;= 22000"
+            Message="Tethercam needs 64-bit Windows 11 (build 22000 or later)." />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Tethercam" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <ComponentGroup Id="Core" Directory="INSTALLFOLDER">
+      <Component Id="Agent" Guid="6E7B5B1D-2C1B-4D3A-9B44-1E2A3F0D7C11">
+        <File Id="AgentExe" Source="$(var.BinDir)\tethercam-agent.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Tethercam"
+                    Description="iPhone webcam over USB" WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
+        </File>
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="Tethercam"
+                       Type="string" Value="&quot;[INSTALLFOLDER]tethercam-agent.exe&quot;" />
+      </Component>
+      <Component Id="VirtualCamera" Guid="0B9D1E6C-7A4F-4C55-8E2B-5D3C9A1F2E77">
+        <File Id="VcamDll" Source="$(var.BinDir)\tethercam-vcam.dll" KeyPath="yes" />
+        <RegistryKey Root="HKLM" Key="Software\Classes\CLSID\{9C8F9375-C87A-46A7-8BFD-552ED47E75BA}">
+          <RegistryValue Type="string" Value="Tethercam Virtual Camera" />
+          <RegistryKey Key="InprocServer32">
+            <RegistryValue Type="string" Value="[#VcamDll]" />
+            <RegistryValue Name="ThreadingModel" Type="string" Value="Both" />
+          </RegistryKey>
+        </RegistryKey>
+      </Component>
+      <Component Id="Docs" Guid="A4C2E8B1-3D6F-4E9A-B7C5-2F1D8E6A9B30">
+        <File Id="License" Source="$(var.RepoDir)\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
+        <File Id="Readme" Source="$(var.RepoDir)\README.md" Name="README.md" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Tethercam" Level="1">
+      <ComponentGroupRef Id="Core" />
+    </Feature>
+
+    <!-- Register the Windows 11 virtual camera (machine-wide) after the files are in place,
+         and remove it before they are deleted. Both run elevated, outside the user context. -->
+    <CustomAction Id="RegisterCamera" FileRef="AgentExe" ExeCommand="--install"
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="UnregisterCamera" FileRef="AgentExe" ExeCommand="--uninstall"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="StopAgent" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[System64Folder]taskkill.exe&quot; /F /IM tethercam-agent.exe"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="StopAgent" Before="UnregisterCamera" Condition="Installed" />
+      <Custom Action="UnregisterCamera" Before="RemoveFiles" Condition="Installed AND REMOVE=&quot;ALL&quot;" />
+      <Custom Action="RegisterCamera" After="InstallFiles" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

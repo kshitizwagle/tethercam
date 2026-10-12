@@ -6,29 +6,42 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    SWIFT_VERSION: "6.0"
-    SWIFT_STRICT_CONCURRENCY: complete
+    # Swift 5 language mode with strict-concurrency warnings; moving to Swift 6 mode is an M8 item.
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: targeted
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""   # set your own team locally; never commit it
+    TARGETED_DEVICE_FAMILY: "1,2"
 targets:
   Tethercam:
     type: application
     platform: iOS
     sources: [Tethercam]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.tethercam.app
     info:
       path: Tethercam/Info.plist
       properties:
         CFBundleDisplayName: Tethercam
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSCameraUsageDescription: Tethercam streams your camera to your PC over the USB cable.
         UILaunchScreen: {}
         UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIApplicationSupportsIndirectInputEvents: true
   TethercamTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [TethercamTests]
+    sources:
+      - TethercamTests
+      - path: ../docs/protocol-vectors/v1.txt
+        buildPhase: resources
     dependencies:
       - target: Tethercam
 schemes:

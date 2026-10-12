@@ -10,8 +10,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S windows -B build -A x64
-      - name: Build
-        run: cmake --build build --config Debug
+        run: cmake -S windows -B build/vs2026-x64 -A x64
+      - name: Build (Debug)
+        run: cmake --build build/vs2026-x64 --config Debug
       - name: Test
-        run: ctest --test-dir build -C Debug --output-on-failure
+        run: ctest --test-dir build/vs2026-x64 -C Debug --output-on-failure
+      - name: Build (Release)
+        run: cmake --build build/vs2026-x64 --config Release
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          ./windows/installer/build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tethercam-windows
+          path: |
+            build/vs2026-x64/Tethercam-*.msi
+            build/vs2026-x64/tools/*/Release/*.exe
