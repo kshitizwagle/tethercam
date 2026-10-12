@@ -1,0 +1,27 @@
+name: ios
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: ios
+        run: xcodegen
+      - name: Build (unsigned)
+        working-directory: ios
+        run: >
+          xcodebuild -project Tethercam.xcodeproj -scheme Tethercam
+          -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
+      - name: Test (simulator)
+        working-directory: ios
+        run: >
+          xcodebuild -project Tethercam.xcodeproj -scheme Tethercam
+          -destination "platform=iOS Simulator,name=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone [^(]+' | sed 's/ *$//')"
+          CODE_SIGNING_ALLOWED=NO test

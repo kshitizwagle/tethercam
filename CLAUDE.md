@@ -1,0 +1,36 @@
+# Tethercam: notes for coding sessions
+
+Tethercam makes an iPhone a Windows 11 webcam over USB, at full video resolution. Video only, wired only,
+no overlays. GPL-3.0.
+
+## Start of every session
+1. Read [MILESTONES.md](MILESTONES.md) for the current milestone, then **Next up** in [TODO.md](TODO.md).
+2. Read only the doc sections the task needs: [docs/TECH_SPEC.md](docs/TECH_SPEC.md) (what/why),
+   [docs/DESIGN.md](docs/DESIGN.md) (how), [docs/PROTOCOL.md](docs/PROTOCOL.md) (bytes on the wire).
+3. Do one or two TODO items per session.
+
+## End of every session
+- **Commit when a milestone's work is done** (one commit per milestone, `M<n>: <summary>`). Don't commit
+  half-finished milestones unless the user asks.
+- Tick finished TODO items and update **Next up**.
+- Add a dated line to the TODO.md session log.
+- Record new findings in TECH_SPEC (risks / open questions) and keep DESIGN/PROTOCOL in sync with the code.
+
+## Rules
+- **Clean room:** never decompile, trace or copy Camo or any other commercial webcam app. Use public
+  Apple/Microsoft docs and permissively licensed references only (see CONTRIBUTING.md).
+- Windows: C++20, CMake, MSVC, WIL for RAII, no exceptions across COM boundaries. `windows/common` stays
+  free of COM/MF so it can be unit-tested.
+- iOS: Swift 6 strict concurrency, XcodeGen (`ios/project.yml`); never commit the generated `.xcodeproj`.
+- The vcam DLL runs inside the FrameServer service as LocalService. It must not block, throw, write files,
+  or trust shared-memory contents without validating them.
+- The iOS app can't be built on the Windows PC. Leave iOS work clearly marked for the Mac.
+
+## Build
+```
+cd windows
+cmake --preset vs2026-x64
+cmake --build --preset debug
+ctest --preset debug
+```
+iOS (on a Mac): `cd ios && xcodegen && xcodebuild -scheme Tethercam -destination 'generic/platform=iOS' build`

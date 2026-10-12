@@ -1,0 +1,41 @@
+name: Tethercam
+options:
+  bundleIdPrefix: org.tethercam
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""   # set your own team locally; never commit it
+targets:
+  Tethercam:
+    type: application
+    platform: iOS
+    sources: [Tethercam]
+    info:
+      path: Tethercam/Info.plist
+      properties:
+        CFBundleDisplayName: Tethercam
+        NSCameraUsageDescription: Tethercam streams your camera to your PC over the USB cable.
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIApplicationSupportsIndirectInputEvents: true
+  TethercamTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [TethercamTests]
+    dependencies:
+      - target: Tethercam
+schemes:
+  Tethercam:
+    build:
+      targets:
+        Tethercam: all
+        TethercamTests: [test]
+    test:
+      targets: [TethercamTests]
