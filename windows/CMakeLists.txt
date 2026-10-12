@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(Tethercam VERSION 0.1.0 LANGUAGES CXX)
+project(Tethercam VERSION 0.1.0 LANGUAGES CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "The Tethercam Windows host only builds on Windows.")
@@ -27,10 +27,12 @@ FetchContent_MakeAvailable(wil)
 option(TETHERCAM_BUILD_TESTS "Build unit tests" ON)
 
 add_subdirectory(common)
+add_subdirectory(media)
 add_subdirectory(agent)
 add_subdirectory(vcam)
 add_subdirectory(tools/tcprobe)
 add_subdirectory(tools/fakephone)
+add_subdirectory(tools/vcamcheck)
 
 if(TETHERCAM_BUILD_TESTS)
     enable_testing()

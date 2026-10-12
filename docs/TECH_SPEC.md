@@ -201,8 +201,8 @@ session 0 and the agent is in the user's session.
 - `Global\Tethercam.FrameReady.v1`: auto-reset event signalled by the agent after each frame.
 - `Global\Tethercam.Control.v1`: auto-reset event signalled by the vcam when the requested format or
   consumer state changes.
-- **DACL (SDDL):** `D:P(A;;GA;;;SY)(A;;GA;;;LS)(A;;GRGW;;;IU)`: SYSTEM and LocalService full access,
-  interactive users read/write. Any logged-in user can supply frames. That's acceptable for a webcam, and
+- **DACL (SDDL):** `D:P(A;;GA;;;SY)(A;;GA;;;LS)(A;;GRGWGX;;;IU)`: SYSTEM and LocalService full access,
+  interactive users read/write/execute (execute includes SYNCHRONIZE, needed to wait on the events). Any logged-in user can supply frames. That's acceptable for a webcam, and
   the docs say so.
 
 The header layout (versioned, seqlock per slot) is in [DESIGN.md § Shared memory](DESIGN.md#shared-memory-layout).
