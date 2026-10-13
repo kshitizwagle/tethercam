@@ -46,8 +46,19 @@ final class Session: @unchecked Sendable {
 
     private static let backpressureSeconds = 0.25
 
+    // Read on the capture queue, written on `queue`: frames are only encoded while the PC streams.
+    private let encodeLock = NSLock()
+    private var encodeEnabled = false
+    private var encoding: Bool {
+        get { encodeLock.lock(); defer { encodeLock.unlock() }; return encodeEnabled }
+        set { encodeLock.lock(); encodeEnabled = newValue; encodeLock.unlock() }
+    }
+
     init() {
-        camera.onFrame = { [weak self] buffer in self?.encoder.encode(buffer) }
+        camera.onFrame = { [weak self] buffer in
+            guard let self, self.encoding else { return }
+            self.encoder.encode(buffer)
+        }
         encoder.onOutput = { [weak self] out in self?.queue.async { self?.send(frame: out) } }
         encoder.onError = { [weak self] status in
             self?.queue.async { self?.reportError(.encoderFailure, "encoder error \(status)") }
@@ -62,6 +73,7 @@ final class Session: @unchecked Sendable {
             server.onListenerState = { [weak self] text in self?.update { $0.message = text == "Listening" ? "Waiting for PC" : text } }
             server.start()
             startTimers()
+            startPreview()
         }
         let center = NotificationCenter.default
         center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
@@ -86,8 +98,17 @@ final class Session: @unchecked Sendable {
     func selectCamera(_ id: UInt8) {
         queue.async { [self] in
             cameraId = id
-            if streaming { applyCapture() }
+            if streaming { applyCapture() } else { startPreview() }
         }
+    }
+
+    /// Runs the camera for the on-screen preview while the PC isn't streaming (no encoding).
+    private func startPreview() {
+        guard !paused, !streaming else { return }
+        encoding = false
+        let formats = camera.cameras.first(where: { $0.id == cameraId })?.formats ?? camera.cameras.first?.formats ?? []
+        guard let f = formats.first(where: { $0.width <= 1920 && $0.height <= 1080 }) ?? formats.last else { return }
+        camera.start(cameraId: cameraId, width: f.width, height: f.height, fps: min(30, f.maxFps)) { _ in }
     }
 
     // MARK: Connection
@@ -131,7 +152,7 @@ final class Session: @unchecked Sendable {
         case let .setCamera(id):
             cameraId = id
             DispatchQueue.main.async { [weak self] in self?.onRemoteChange?(id, false) }
-            if streaming { applyCapture() }
+            if streaming { applyCapture() } else { startPreview() }
         case let .setFormat(w, h, fps, _, bitrate):
             format = (w, h, max(1, fps))
             requestedBitrate = bitrate
@@ -177,6 +198,7 @@ final class Session: @unchecked Sendable {
             guard let self else { return }
             self.queue.async {
                 if ok {
+                    self.encoding = self.streaming
                     self.update { $0.streaming = true; $0.width = Int(self.format.width); $0.height = Int(self.format.height); $0.message = "Streaming" }
                 } else {
                     self.reportError(.invalidFormat, "cannot capture \(self.format.width)x\(self.format.height) @ \(self.format.fps)")
@@ -187,8 +209,9 @@ final class Session: @unchecked Sendable {
 
     private func stopStreaming() {
         streaming = false
-        camera.stop()
+        encoding = false
         encoder.invalidate()
+        startPreview()
         configSent = false
         update { $0.streaming = false; $0.fps = 0; $0.mbps = 0; $0.message = $0.connected ? "Connected" : "Waiting for PC" }
     }
@@ -202,6 +225,9 @@ final class Session: @unchecked Sendable {
         } else if streaming {
             camera.resume()
             applyCapture()
+        } else {
+            camera.resume()
+            startPreview()
         }
     }
 

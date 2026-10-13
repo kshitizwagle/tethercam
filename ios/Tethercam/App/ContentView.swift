@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -11,6 +12,15 @@ struct ContentView: View {
                 CameraPreview(session: model.session.camera.session)
                     .ignoresSafeArea()
                     .opacity(model.dimmed ? 0 : 1)
+            } else if model.permission == .notDetermined {
+                VStack(spacing: 12) {
+                    Image(systemName: "video").font(.system(size: 44))
+                    Text("Tethercam needs your camera").font(.title3.weight(.semibold))
+                    Button("Allow camera") { Task { await model.activate() } }
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(32)
+                .foregroundStyle(.white)
             } else if model.permission == .denied || model.permission == .restricted {
                 VStack(spacing: 12) {
                     Image(systemName: "video.slash").font(.system(size: 44))
@@ -64,7 +74,10 @@ struct ContentView: View {
         }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
-        .onAppear { model.onAppear() }
+        .task { await model.activate() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { Task { await model.activate() } }
+        }
     }
 }
 

@@ -46,6 +46,9 @@ void BgraToNv12(const uint8_t* bgra, uint32_t pitch, Nv12Frame& dst);
 // Moving colour bars with a frame-number ticker, for fakephone and tests.
 void TestPattern(Nv12Frame& f, uint64_t frame_number);
 
+// Converts NV12 to top-down 32-bit BGRA (alpha 255), BT.601 limited range.
+void Nv12ToBgra(const Nv12View& f, uint8_t* bgra, uint32_t pitch);
+
 // Writes an NV12 frame as a 24-bit BMP (for debugging snapshots).
 bool SaveBmp(const Nv12View& f, const char* path);
 

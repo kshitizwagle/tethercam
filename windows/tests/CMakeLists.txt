@@ -13,6 +13,7 @@ add_executable(tcam_tests
     media_test.cpp)
 target_link_libraries(tcam_tests PRIVATE tcam_common GTest::gtest_main)
 target_compile_definitions(tcam_tests PRIVATE
+    TETHERCAM_EXPECTED_VERSION="${PROJECT_VERSION}"
     TETHERCAM_VECTORS="${CMAKE_CURRENT_SOURCE_DIR}/../../docs/protocol-vectors/v1.txt")
 
 include(GoogleTest)

@@ -58,6 +58,19 @@ TEST(Image, MirrorFlipsHorizontally) {
     EXPECT_EQ(dst.Y()[0], 16);
 }
 
+TEST(Image, Nv12ToBgraRoundTrip) {
+    std::vector<uint8_t> bgra(4 * 4 * 2, 255);
+    for (int i = 16; i < 32; ++i) bgra[size_t(i)] = (i % 4 == 3) ? 255 : 0;  // second row black
+    image::Nv12Frame f;
+    f.Resize(4, 2);
+    image::BgraToNv12(bgra.data(), 16, f);
+    std::vector<uint8_t> back(4 * 4 * 2, 0);
+    image::Nv12ToBgra(f.View(), back.data(), 16);
+    EXPECT_NEAR(back[0], 255, 2);  // white stays white
+    EXPECT_NEAR(back[16], 0, 2);   // black stays black
+    EXPECT_EQ(back[3], 255);       // opaque
+}
+
 TEST(Image, BgraWhiteAndBlack) {
     std::vector<uint8_t> bgra(4 * 4 * 2, 255);
     for (int i = 16; i < 32; ++i) bgra[size_t(i)] = 0;  // second row black

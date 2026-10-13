@@ -138,6 +138,21 @@ void TestPattern(Nv12Frame& f, uint64_t n) {
     }
 }
 
+void Nv12ToBgra(const Nv12View& f, uint8_t* bgra, uint32_t pitch) {
+    for (uint32_t y = 0; y < f.height; ++y) {
+        const uint8_t* yr = f.y + size_t(y) * f.y_pitch;
+        const uint8_t* uvr = f.uv + size_t(y / 2) * f.uv_pitch;
+        uint8_t* out = bgra + size_t(y) * pitch;
+        for (uint32_t x = 0; x < f.width; ++x) {
+            const int c = yr[x] - 16, d = uvr[x & ~1u] - 128, e = uvr[(x & ~1u) + 1] - 128;
+            out[x * 4 + 0] = uint8_t(std::clamp((298 * c + 516 * d + 128) >> 8, 0, 255));
+            out[x * 4 + 1] = uint8_t(std::clamp((298 * c - 100 * d - 208 * e + 128) >> 8, 0, 255));
+            out[x * 4 + 2] = uint8_t(std::clamp((298 * c + 409 * e + 128) >> 8, 0, 255));
+            out[x * 4 + 3] = 255;
+        }
+    }
+}
+
 bool SaveBmp(const Nv12View& f, const char* path) {
     const uint32_t row = (f.width * 3 + 3) & ~3u;
     const uint32_t img = row * f.height;

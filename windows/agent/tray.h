@@ -4,7 +4,10 @@
 
 #include <string>
 
+#include <memory>
+
 #include "engine.h"
+#include "preview.h"
 
 namespace tethercam::agent {
 
@@ -16,6 +19,7 @@ public:
     int Run();
     // Thread-safe: asks the UI thread to refresh icon and tooltip.
     void PostRefresh();
+    void ShowPreview();
 
 private:
     static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -30,6 +34,7 @@ private:
     HICON icons_[4] = {};
     bool added_ = false;
     UINT taskbar_created_ = 0;
+    std::unique_ptr<PreviewWindow> preview_;
 };
 
 }  // namespace tethercam::agent

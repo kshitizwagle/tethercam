@@ -32,6 +32,14 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
           rm -rf Payload && mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/Tethercam.app Payload/
+          # Ad-hoc sign with an (empty) entitlements blob: AltStore reads the existing signature's
+          # entitlements before re-signing with the user's Apple ID and rejects a fully unsigned binary
+          # ("The data couldn't be read because it isn't in the correct format").
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0"><dict/></plist>' > adhoc.entitlements
+          codesign --force --sign - --entitlements adhoc.entitlements --timestamp=none Payload/Tethercam.app
+          codesign -d --entitlements :- Payload/Tethercam.app
           zip -qry Tethercam-unsigned.ipa Payload
           ls -l Tethercam-unsigned.ipa
       - uses: actions/upload-artifact@v4

@@ -3,6 +3,7 @@
 //
 //   tethercam-agent                    run the tray agent
 //   tethercam-agent --console          run with a console log (no tray)
+//   tethercam-agent --preview          open the preview window at startup
 //   tethercam-agent --tcp HOST:PORT    use plain TCP to a simulated device (fakephone)
 //   tethercam-agent --session-camera   also create a temporary camera for this session (no admin)
 //   tethercam-agent --install [--user] [--dll PATH]     register the virtual camera
@@ -61,12 +62,13 @@ void AttachConsoleIfAny(bool create) {
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    bool console = false, install = false, uninstall = false, per_user = false, session_camera = false;
+    bool console = false, preview = false, install = false, uninstall = false, per_user = false, session_camera = false;
     agent::Engine::Options options;
     std::wstring dll = agent::DefaultDllPath();
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
         if (a == L"--console") console = true;
+        else if (a == L"--preview") preview = true;
         else if (a == L"--install") install = true;
         else if (a == L"--uninstall") uninstall = true;
         else if (a == L"--user") per_user = true;
@@ -117,6 +119,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     } else {
         agent::Tray tray(instance, engine, log_dir);
         engine.Start([&tray] { tray.PostRefresh(); });
+        if (preview) tray.ShowPreview();
         result = tray.Run();
     }
     engine.StopThread();

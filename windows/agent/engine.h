@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "tethercam/formats.h"
+#include "tethercam/image.h"
 #include "tethercam/net.h"
 #include "tethercam/protocol.h"
 #include "tethercam/shm.h"
@@ -45,6 +46,12 @@ public:
     void SetMirror(bool mirror);
     void SetRotation(uint16_t degrees);
 
+    // The preview window counts as a consumer: while it's open the phone streams even if no app
+    // has the virtual camera open.
+    void SetPreview(bool active) { preview_active_ = active; }
+    // Copies the latest preview frame (at most 1280x720) if it's newer than `seq`. Thread-safe.
+    bool CopyPreview(image::Nv12Frame& out, uint64_t& seq) const;
+
 private:
     struct Consumer {
         bool active = false;
@@ -74,6 +81,11 @@ private:
     uint64_t last_shm_try_ = 0;
     unsigned long last_shm_error_ = 0;
     std::string last_vcam_message_;
+
+    std::atomic<bool> preview_active_{false};
+    mutable std::mutex preview_mu_;
+    image::Nv12Frame preview_;
+    uint64_t preview_seq_ = 0;
 };
 
 }  // namespace tethercam::agent

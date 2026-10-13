@@ -17,6 +17,7 @@ constexpr UINT kTrayId = 1;
 
 enum MenuId : UINT {
     kQuit = 100,
+    kPreview,
     kOpenLogs,
     kMirror,
     kRotate0,
@@ -159,6 +160,8 @@ void Tray::ShowMenu() {
     std::wstring status = StatusText(s.status);
     if (!s.device_name.empty()) status += L": " + Widen(s.device_name);
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status.c_str());
+    AppendMenuW(menu, MF_STRING, kPreview, L"Show preview");
+    SetMenuDefaultItem(menu, kPreview, FALSE);
     if (!s.detail.empty()) AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, Widen(s.detail).c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     if (!s.cameras.empty()) {
@@ -187,10 +190,16 @@ void Tray::ShowMenu() {
     const UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, nullptr);
     DestroyMenu(menu);
     if (cmd == kQuit) PostQuitMessage(0);
+    else if (cmd == kPreview) ShowPreview();
     else if (cmd == kOpenLogs) ShellExecuteW(nullptr, L"open", log_dir_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     else if (cmd == kMirror) engine_.SetMirror(!s.mirror);
     else if (cmd >= kRotate0 && cmd <= kRotate270) engine_.SetRotation(uint16_t((cmd - kRotate0) * 90));
     else if (cmd >= kCameraBase) engine_.SelectCamera(int(cmd - kCameraBase));
+}
+
+void Tray::ShowPreview() {
+    if (!preview_) preview_ = std::make_unique<PreviewWindow>(instance_, engine_);
+    preview_->Show();
 }
 
 LRESULT CALLBACK Tray::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -204,8 +213,12 @@ LRESULT CALLBACK Tray::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             self->Refresh();
             return 0;
         }
-        if (msg == kTrayMessage && (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_LBUTTONUP)) {
+        if (msg == kTrayMessage && LOWORD(lp) == WM_RBUTTONUP) {
             self->ShowMenu();
+            return 0;
+        }
+        if (msg == kTrayMessage && (LOWORD(lp) == WM_LBUTTONUP || LOWORD(lp) == WM_LBUTTONDBLCLK)) {
+            self->ShowPreview();
             return 0;
         }
         if (msg == self->taskbar_created_) {  // Explorer restarted

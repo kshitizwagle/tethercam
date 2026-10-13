@@ -13,21 +13,16 @@ final class AppModel: ObservableObject {
     let session = Session()
     private var started = false
 
-    func onAppear() {
+    /// Called when the screen appears and whenever the app becomes active (the user may have changed
+    /// camera access in Settings meanwhile).
+    func activate() async {
         UIApplication.shared.isIdleTimerDisabled = true
-        switch permission {
-        case .authorized:
-            startSession()
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                Task { @MainActor in
-                    self.permission = granted ? .authorized : .denied
-                    if granted { self.startSession() }
-                }
-            }
-        default:
-            break
+        permission = AVCaptureDevice.authorizationStatus(for: .video)
+        if permission == .notDetermined {
+            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            permission = granted ? .authorized : .denied
         }
+        if permission == .authorized { startSession() }
     }
 
     private func startSession() {
