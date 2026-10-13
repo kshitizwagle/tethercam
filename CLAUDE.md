@@ -17,6 +17,10 @@ no overlays. GPL-3.0.
 - Record new findings in TECH_SPEC (risks / open questions) and keep DESIGN/PROTOCOL in sync with the code.
 
 ## Rules
+- **Status API is a stable contract** (docs/STATUS_API.md): the stream dashboard in
+  `C:\Users\Admin\dev\streaming` follows `http://127.0.0.1:4790/events` and the `live` field.
+- **Don't edit Streamlabs scenes from this repo.** Scene changes belong to the streaming project
+  (`C:\Users\Admin\dev\streaming`, see its CLAUDE.md: both canvases, locked items, hidden partners).
 - **Clean room:** never decompile, trace or copy Camo or any other commercial webcam app. Use public
   Apple/Microsoft docs and permissively licensed references only (see CONTRIBUTING.md).
 - Windows: C++20, CMake, MSVC, WIL for RAII, no exceptions across COM boundaries. `windows/common` stays

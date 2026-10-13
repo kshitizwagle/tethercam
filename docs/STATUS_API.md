@@ -1,5 +1,9 @@
 # Tethercam status API
 
+> **Stable contract.** The stream dashboard in `C:\Users\Admin\dev\streaming` depends on this API:
+> port **4790**, `GET /events` (SSE) and the **`live`** field. Don't change or remove them. Add new
+> fields freely (consumers ignore unknown ones).
+
 The Windows agent serves the camera's state on the loopback interface so stream overlays (OBS /
 Streamlabs browser sources) can react, for example by showing their own "camera offline" design.
 While the camera isn't live, the Tethercam virtual camera itself only outputs **black** (the text
