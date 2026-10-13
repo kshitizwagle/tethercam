@@ -119,6 +119,7 @@ To register a development build of the camera machine-wide, run
 | [docs/TECH_SPEC.md](docs/TECH_SPEC.md) | Requirements, architecture, formats, risks, open questions |
 | [docs/DESIGN.md](docs/DESIGN.md) | Internals: processes, threads, IPC, state machines, repo layout, testing |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | Byte-level phone ↔ PC wire protocol |
+| [docs/STATUS_API.md](docs/STATUS_API.md) | Local status API (`http://127.0.0.1:4790`) for stream overlays |
 | [docs/PLAN.md](docs/PLAN.md) | Implementation plan and order of work |
 | [docs/perf.md](docs/perf.md) / [docs/compat.md](docs/compat.md) | Measurements and app compatibility |
 | [MILESTONES.md](MILESTONES.md) | Milestones and exit criteria |
