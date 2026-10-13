@@ -55,16 +55,19 @@ void FrameSource::Start(uint32_t width, uint32_t height, uint32_t fps) {
     live_.Resize(width, height);
     placeholder_status_ = shm::AgentStatus(0xFFFFFFFF);
     last_new_frame_ms_ = 0;
-    if (!EnsureShm()) return;
+    if (EnsureShm()) Announce("started");
+}
+
+void FrameSource::Announce(const char* verb) {
     auto* h = static_cast<shm::Header*>(shm_.view);
-    h->req_width = width;
-    h->req_height = height;
+    h->req_width = width_;
+    h->req_height = height_;
     h->req_fps = fps_;
     shm::Atomic(h->consumer_active).store(1, std::memory_order_release);
     shm::Atomic(h->control_seq).fetch_add(1, std::memory_order_acq_rel);
     SetEvent(shm_.control);
     char msg[96];
-    std::snprintf(msg, sizeof(msg), "vcam: started %ux%u @ %u", width, height, fps_);
+    std::snprintf(msg, sizeof(msg), "vcam: %s %ux%u @ %u", verb, width_, height_, fps_);
     Report(msg);
 }
 
@@ -122,6 +125,10 @@ bool FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pi
     bool status_card = false;  // default: plain black while not live, so stream layouts show through cleanly
     if (EnsureShm()) {
         auto* h = static_cast<shm::Header*>(shm_.view);
+        // consumer_active is one flag shared by every source instance. When an app swaps one
+        // instance for another (OBS changing scenes), the old one's Stop can land after the new
+        // one's Start; a running stream re-asserts the flag so the agent keeps the phone streaming.
+        if (shm::Atomic(h->consumer_active).load(std::memory_order_acquire) == 0) Announce("resumed");
         const uint64_t now = GetTickCount64();
         const uint64_t beat = shm::Atomic(h->agent_heartbeat_ms).load(std::memory_order_acquire);
         const bool agent_alive = beat != 0 && now >= beat && now - beat < kAgentTimeoutMs;

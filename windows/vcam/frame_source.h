@@ -26,6 +26,8 @@ public:
 
 private:
     bool EnsureShm();
+    // Publishes the started format and sets consumer_active. Call with mu_ held and shm ready.
+    void Announce(const char* verb);
     const image::Nv12Frame& Placeholder(shm::AgentStatus status);
 
     std::mutex mu_;

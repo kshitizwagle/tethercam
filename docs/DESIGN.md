@@ -209,7 +209,10 @@ shows black by default, or the placeholder for `agent_status` when `placeholder_
   when one is provided (`MFSampleAllocatorUsage_UsesProvidedAllocator`), else a 2D memory buffer, fills it
   with a live frame or the placeholder, timestamps it with `MFGetSystemTime()` and queues `MEMediaSample`.
 - `Stop`/`Shutdown` clear `consumer_active`. Several consumers share one source through Frame Server
-  (`MF_DEVICESTREAM_FRAMESERVER_SHARED`).
+  (`MF_DEVICESTREAM_FRAMESERVER_SHARED`). The flag is shared by every source instance, so a running
+  stream re-asserts it (and its size) on each frame when it finds it cleared: an app that swaps instances
+  (OBS changing scenes) can have the old instance's `Stop` land after the new one's `Start`, and the
+  agent's 2 s grace absorbs the gap.
 - Lock order is source → stream; `GetEvent` (which can block) never runs under a lock; `Shutdown` breaks
   the source ↔ stream reference cycle.
 - Logging: `OutputDebugString` (view with DebugView) plus `vcam_message` in shared memory, which the agent
