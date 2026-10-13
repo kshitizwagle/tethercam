@@ -2,6 +2,17 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-13: Glass-to-glass latency in Streamlabs (app 0.1.10, agent 0.1.11)
+
+Front camera, 1080p60 (Streamlabs source 1920x1080, buffering disabled), original Apple cable into a
+motherboard port. A millisecond clock on screen, the phone filming it, and screenshots of the clock next
+to the Streamlabs preview: **131, 133, 135, 143 ms** (steady, no drift). Includes camera exposure and
+monitor scan-out. The perceived "lag" was A/V and game sync: a USB mic and Game Capture are near-instant,
+so Streamlabs needs a ~135 ms Render Delay on Game Capture and Sync Offset on Desktop Audio and Mic.
+VDO.Ninja not yet measured the same way (it carries the phone's mic in sync with its video).
+A longer third-party USB cable caused repeated USB re-enumeration (device id changes, drops to
+"waiting for iPhone"); the original cable is stable.
+
 ## 2026-10-13: 4K60 for 30 minutes (app 0.1.10, thermal test)
 
 `tcprobe stream --size 3840x2160 --fps 60 --decode` for 1800 s, back wide lens, iPhone 15 Pro Max on
