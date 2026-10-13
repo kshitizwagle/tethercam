@@ -87,8 +87,14 @@ final class H264Encoder: @unchecked Sendable {
         if status != noErr { onError?(status) }
     }
 
+    /// Low-latency rate control removes the encoder's pipelining. Up to 1440p that costs nothing, but at
+    /// 4K60 it capped real devices at ~42 fps (iPhone 15 Pro Max, docs/perf.md), so above 1440p use the
+    /// normal real-time encoder (still no B-frames, at most one frame of delay).
+    static let lowLatencyMaxPixels = Int32(2560 * 1440)
+
     private func createSession(width w: Int32, height h: Int32) -> Bool {
-        let spec: [CFString: Any] = [kVTVideoEncoderSpecification_EnableLowLatencyRateControl: true]
+        let lowLatency = w * h <= Self.lowLatencyMaxPixels
+        let spec: [CFString: Any] = lowLatency ? [kVTVideoEncoderSpecification_EnableLowLatencyRateControl: true] : [:]
         var s: VTCompressionSession?
         let status = VTCompressionSessionCreate(
             allocator: nil, width: w, height: h, codecType: kCMVideoCodecType_H264,
@@ -96,8 +102,12 @@ final class H264Encoder: @unchecked Sendable {
             compressedDataAllocator: nil, outputCallback: nil, refcon: nil, compressionSessionOut: &s)
         guard status == noErr, let s else { return false }
         VTSessionSetProperty(s, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_ConstrainedHigh_AutoLevel)
+        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ProfileLevel,
+                             value: lowLatency ? kVTProfileLevel_H264_ConstrainedHigh_AutoLevel : kVTProfileLevel_H264_High_AutoLevel)
         VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+        if !lowLatency {
+            VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: NSNumber(value: 1))
+        }
         applyRate(s)
         VTCompressionSessionPrepareToEncodeFrames(s)
         session = s

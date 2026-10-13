@@ -2,6 +2,22 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-13: 4K60 from the iPhone (tcprobe, app 0.1.4)
+
+`tcprobe stream --size 3840x2160 --fps 60 --decode` over USB, back wide lens, phone charging.
+Ran ~160 s (6549 frames, 1.31 GB) until the installed agent was restarted and took over the phone.
+
+| Measure | Result |
+|---|---|
+| Delivered frame rate | **~41.5 fps** (phone-reported and PC-received agree), not 60 |
+| Bitrate | ~66 Mbps (70 Mbps requested) |
+| PC decode | hardware, 41–42 fps, **0 decode errors** |
+| Phone thermal state | 0 (nominal) throughout; battery 100 %, charging |
+
+The cap is on the phone. Likely cause: VideoToolbox low-latency rate control, which removes encoder
+pipelining. App 0.1.9 uses low-latency mode only up to 1440p and the normal real-time encoder (no
+B-frames, max one frame of delay) for 4K. Re-measure 4K60 and a 30-minute thermal run with 0.1.9.
+
 ## 2026-10-13: Glass-to-glass latency (real iPhone)
 
 **Method:** a double-buffered millisecond clock on the left half of the monitor; the iPhone's back camera
