@@ -38,10 +38,16 @@ size the app asked for (up to 3840×2160 at 60 fps) when it can; otherwise the a
 1. Install **Apple Devices** from the Microsoft Store.
 2. Run `Tethercam-<version>-x64.msi` (from a release, or build it as described below). It installs to
    `Program Files\Tethercam`, registers the "Tethercam" camera and starts the tray agent at login.
-3. Install the iPhone app: download `Tethercam-unsigned.ipa` from a release (or the `ios` CI run's
-   artifacts) and sideload it with [Sideloadly](https://sideloadly.io) or [AltStore](https://altstore.io),
-   which sign it with your Apple ID (a free Apple ID needs re-signing every 7 days). Or build it from
-   `ios/` in Xcode. Open the app, plug in the cable and tap **Trust**.
+3. Install the iPhone app. Pick one:
+   - **AltStore** (gets updates): in AltStore → Browse → Sources → **+**, add
+     `https://raw.githubusercontent.com/kshitizwagle/tethercam/main/altstore/source.json`, then install
+     Tethercam from it.
+   - **Sideloadly / AltStore file install:** download `Tethercam-unsigned.ipa` from a
+     [release](https://github.com/kshitizwagle/tethercam/releases) and sideload it.
+   - **Xcode:** build `ios/` yourself.
+
+   Sideloaded apps are signed with your Apple ID; with a free Apple ID they must be refreshed every
+   7 days (AltStore does this automatically). Open the app, plug in the cable and tap **Trust**.
 4. Pick **Tethercam** as the camera in your video app.
 
 The tray icon shows the state: grey = no iPhone, amber = iPhone found but the app isn't open (or it's

@@ -1,0 +1,40 @@
+{
+  "name": "Tethercam",
+  "identifier": "org.tethercam.source",
+  "subtitle": "iPhone as a Windows webcam over USB",
+  "description": "Free, open-source (GPL-3.0) app that turns your iPhone into a full-resolution webcam for Windows 11 over a USB cable. Install the Windows side from the MSI on the GitHub releases page.",
+  "iconURL": "https://raw.githubusercontent.com/kshitizwagle/tethercam/main/altstore/icon.png",
+  "website": "https://github.com/kshitizwagle/tethercam",
+  "tintColor": "#22A35E",
+  "apps": [
+    {
+      "name": "Tethercam",
+      "bundleIdentifier": "org.tethercam.app",
+      "developerName": "Tethercam contributors",
+      "subtitle": "Use your iPhone as a webcam on Windows over USB",
+      "localizedDescription": "Tethercam streams your iPhone camera to a Windows 11 PC over the USB cable, at up to 4K 60 fps, where it shows up as a normal webcam in Teams, Zoom, OBS, browsers and the Camera app. No account, no watermark, no Wi-Fi.\n\nYou also need the Windows app (MSI) from https://github.com/kshitizwagle/tethercam/releases and Apple Devices (Microsoft Store) on the PC.",
+      "iconURL": "https://raw.githubusercontent.com/kshitizwagle/tethercam/main/altstore/icon.png",
+      "tintColor": "#22A35E",
+      "category": "utilities",
+      "screenshots": [],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSCameraUsageDescription": "Tethercam streams your camera to your PC over the USB cable."
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "buildVersion": "1",
+          "date": "2026-10-13T02:30:00Z",
+          "localizedDescription": "First alpha.",
+          "downloadURL": "https://github.com/kshitizwagle/tethercam/releases/download/v0.1.0-alpha.1/Tethercam-unsigned.ipa",
+          "size": 135129,
+          "minOSVersion": "16.0"
+        }
+      ]
+    }
+  ],
+  "news": []
+}

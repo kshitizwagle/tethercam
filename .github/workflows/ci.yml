@@ -7,7 +7,8 @@ name: ci
 on:
   push:
     branches: ["**"]
-    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+    # altstore/** is ignored so the release job's own source.json commit can't start another release.
+    paths-ignore: ["**.md", "docs/**", "LICENSE", "altstore/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**", "LICENSE"]
   workflow_dispatch:
@@ -70,6 +71,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -88,4 +92,16 @@ jobs:
           if [ "${VERSION%%.*}" = 0 ]; then stage=--prerelease; else stage=--latest; fi
           gh release create "v$VERSION" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $stage \
             --title "Tethercam v$VERSION" --generate-notes \
-            --notes "Windows: install the MSI (needs Windows 11 and the Apple Devices app). iPhone: sideload Tethercam-unsigned.ipa with Sideloadly or AltStore (signs it with your Apple ID). See README for details."
+            --notes "Windows: install the MSI (needs Windows 11 and the Apple Devices app). iPhone: add the AltStore source https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/altstore/source.json, or sideload Tethercam-unsigned.ipa with Sideloadly/AltStore (signs it with your Apple ID). See README for details."
+      - name: Add the release to the AltStore source
+        # Commits to main with [skip ci]; altstore/** is also in paths-ignore above.
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          python3 scripts/update_altstore_source.py "v$VERSION" out/Tethercam-unsigned.ipa "Tethercam v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add altstore/source.json
+          git commit -m "altstore: add v$VERSION [skip ci]"
+          git pull --rebase -q origin main
+          git push origin HEAD:main
