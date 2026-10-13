@@ -73,6 +73,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 - [x] Release workflow with checksums (MSI + unsigned IPA); pre-release tag v0.1.0-alpha.1
 
 ## Session log
+- 2026-10-13 (2): One `ci` workflow builds Windows + iOS; when both pass on main it tags the next vX.Y.Z (patch bump, `[minor]`/`[major]` in the commit message) and publishes MSI + IPA + checksums; docs-only pushes skip CI. Version is stamped into the binaries, MSI and IPA. Replaces the manual-tag release.yml.
 - 2026-10-13: Camera registered (elevated) and verified through Frame Server; MSI install/uninstall verified; repo published, CI green incl. Swift build + tests; CI builds a sideloadable unsigned IPA; release workflow added.
 - 2026-10-12 (2): Built the whole Windows side (common, media, vcam, agent, tools, installer) and the iOS app code. Verified the Windows pipeline end to end with fakephone: hardware decode, 720p–4K negotiation, live frames through the media source, agent restart recovery, 3-minute soak. Blocked on: iPhone only visible over Wi-Fi (not trusted over USB), no admin rights for machine-wide camera registration (UAC was declined), no Mac for the iOS build.
 - 2026-10-12: Windows skeleton builds with VS 2026; iOS skeleton and CI written. M0 committed (iOS build + CI run still to verify).

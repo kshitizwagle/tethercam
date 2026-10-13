@@ -1,9 +1,11 @@
 name: windows
 
 on:
-  push:
-  pull_request:
   workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
 
 jobs:
   build:
@@ -11,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S windows -B build/vs2026-x64 -A x64
+        run: cmake -S windows -B build/vs2026-x64 -A x64 "-DTETHERCAM_BUILD_VERSION=${{ inputs.version }}"
       - name: Build (Debug)
         run: cmake --build build/vs2026-x64 --config Debug
       - name: Test
@@ -25,7 +27,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet tool install --global wix --version 5.0.2
-          ./windows/installer/build.ps1
+          ./windows/installer/build.ps1 -Version "${{ inputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: tethercam-windows

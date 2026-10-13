@@ -1,9 +1,11 @@
 name: ios
 
 on:
-  push:
-  pull_request:
   workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
 
 jobs:
   build:
@@ -26,6 +28,7 @@ jobs:
         run: |
           xcodebuild -project Tethercam.xcodeproj -scheme Tethercam -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath build \
+            MARKETING_VERSION=${{ inputs.version }} CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
           rm -rf Payload && mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/Tethercam.app Payload/

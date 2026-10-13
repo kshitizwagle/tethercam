@@ -1,0 +1,91 @@
+name: ci
+
+# Builds and tests Windows and iOS on every push and pull request. When both pass on main, the next
+# vX.Y.Z tag is created on that commit and the MSI and IPA from this run are published as its release.
+# Pushes that only touch docs don't build, so they never make a release.
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Queue main builds so two releases never pick the same version; elsewhere only the newest matters.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Next version
+        id: next
+        # Bumps the patch of the last vX.Y.Z tag (pre-release tags like v0.1.0-alpha.1 don't count; the
+        # first is 0.1.0). Put [minor] or [major] in the commit message to bump those instead. Plain
+        # X.Y.Z only: MSI versions can't carry a pre-release suffix.
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ -z "$last" ]; then
+            next=0.1.0
+          else
+            IFS=. read -r major minor patch <<< "${last#v}"
+            case "$MESSAGE" in
+              *"[major]"*) next="$((major + 1)).0.0" ;;
+              *"[minor]"*) next="$major.$((minor + 1)).0" ;;
+              *) next="$major.$minor.$((patch + 1))" ;;
+            esac
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "Version $next" >> "$GITHUB_STEP_SUMMARY"
+
+  windows:
+    needs: version
+    uses: ./.github/workflows/windows.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  ios:
+    needs: version
+    uses: ./.github/workflows/ios.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  release:
+    needs: [version, windows, ios]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Collect files and checksums
+        run: |
+          mkdir out
+          cp dist/tethercam-windows/Tethercam-*.msi out/
+          cp dist/tethercam-ios/Tethercam-unsigned.ipa out/
+          cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Tag and publish release
+        # Creates the tag on this commit. Tags pushed with the workflow token don't start other runs.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if [ "${VERSION%%.*}" = 0 ]; then stage=--prerelease; else stage=--latest; fi
+          gh release create "v$VERSION" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $stage \
+            --title "Tethercam v$VERSION" --generate-notes \
+            --notes "Windows: install the MSI (needs Windows 11 and the Apple Devices app). iPhone: sideload Tethercam-unsigned.ipa with Sideloadly or AltStore (signs it with your Apple ID). See README for details."

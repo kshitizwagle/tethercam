@@ -84,7 +84,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 - [x] MSI install / uninstall / reinstall verified (files, HKLM COM key, Run key, camera present/absent)
 - [x] iOS app: unsigned sideloadable IPA built by CI (Sideloadly/AltStore)
 - [x] User guide + troubleshooting in README
-- [x] Release workflow publishes MSI + IPA + SHA256SUMS on `v*` tags (pre-release)
+- [x] Every green build of main is tagged `vX.Y.Z` and released with MSI + IPA + SHA256SUMS (`ci.yml`; pre-release while 0.x)
 
 ## M8: Backlog
 Audio (virtual microphone), HEVC, Windows 10 DirectShow fallback, focus/exposure, GPU scaling and shared

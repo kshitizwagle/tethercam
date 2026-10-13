@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
-project(Tethercam VERSION 0.1.0 LANGUAGES CXX RC)
+set(TETHERCAM_BUILD_VERSION "0.1.0" CACHE STRING "Version stamped into the binaries and the MSI; CI sets it per build")
+project(Tethercam VERSION ${TETHERCAM_BUILD_VERSION} LANGUAGES CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "The Tethercam Windows host only builds on Windows.")
