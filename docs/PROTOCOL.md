@@ -143,8 +143,9 @@ A peer that hears nothing (no message of any kind) for **3 s** treats the connec
 | `charging` | u8 | 0/1 |
 | `actual_bitrate_kbps` | u32 | Measured over the last second |
 | `actual_fps` | u16 | ×100, e.g. 2997 |
+| `camera_id` | u8 | Lens currently in use (`Caps` id), 255 = unknown. Appended in app 0.1.4; older devices omit it |
 
-Sent every 2 s while streaming.
+Sent every 2 s while streaming. The host remembers `camera_id` so a lens picked on the phone survives reconnects.
 
 ### 0x7F Error
 

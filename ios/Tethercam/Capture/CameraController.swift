@@ -92,15 +92,46 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             (.back, .builtInTelephotoCamera, .telephoto, "Back Telephoto"),
             (.front, .builtInWideAngleCamera, .front, "Front"),
         ]
+        let zoom = Self.backZoomFactors()
         for (position, type, lens, label) in order {
             guard let device = found.first(where: { $0.position == position && $0.deviceType == type }) else { continue }
             let formats = Self.videoFormats(of: device)
             guard !formats.isEmpty else { continue }
             devices[id] = device
+            // Back lenses carry their Camera-app zoom factor ("Back Telephoto 5×"); the PC shows it too.
+            var name = label
+            if position == .back, let factor = zoom[lens] { name += " " + Self.zoomText(factor) }
             cameras.append(CameraInfo(id: id, position: position == .front ? .front : .back, lens: lens,
-                                      label: label, formats: formats))
+                                      label: name, formats: formats))
             id += 1
         }
+    }
+
+    /// Zoom factors as the Camera app shows them (wide = 1×), from the multi-camera switch-over points.
+    static func backZoomFactors() -> [Lens: Double] {
+        var factors: [Lens: Double] = [.wide: 1]
+        let session = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera], mediaType: .video, position: .back)
+        guard let virtual = session.devices.first else { return factors }
+        let points = virtual.virtualDeviceSwitchOverVideoZoomFactors.map { $0.doubleValue }
+        switch virtual.deviceType {
+        case .builtInTripleCamera where points.count >= 2:  // ultra wide, wide, tele
+            factors[.ultraWide] = 1 / points[0]
+            factors[.telephoto] = points[1] / points[0]
+        case .builtInDualWideCamera where points.count >= 1:  // ultra wide, wide
+            factors[.ultraWide] = 1 / points[0]
+        case .builtInDualCamera where points.count >= 1:  // wide, tele
+            factors[.telephoto] = points[0]
+        default:
+            break
+        }
+        return factors
+    }
+
+    static func zoomText(_ factor: Double) -> String {
+        let rounded = (factor * 10).rounded() / 10
+        let text = rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
+        return text + "\u{00D7}"
     }
 
     /// Unique 8-bit 4:2:0 video sizes with their highest frame rate (capped at 60), largest first.

@@ -63,6 +63,7 @@ private:
     void RunSession(net::Socket& sock);
     Consumer TickShm();
     void SetStatus(shm::AgentStatus s, const std::string& detail = {});
+    void RememberCameraLocked();  // persists the selected lens's label; caller holds mu_
     void Notify();
 
     Options opt_;
@@ -73,6 +74,7 @@ private:
 
     mutable std::mutex mu_;
     Snapshot snap_;
+    std::string preferred_camera_;  // label of the last lens the user picked (PC or phone)
     std::atomic<bool> options_dirty_{false};
     std::atomic<bool> camera_dirty_{false};
 

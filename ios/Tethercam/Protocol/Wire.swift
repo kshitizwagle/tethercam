@@ -66,7 +66,7 @@ enum Message: Equatable, Sendable {
     case videoConfig(codec: UInt8, width: UInt16, height: UInt16, fps: UInt16, parameterSets: Data)
     case videoFrame(ptsUs: UInt64, keyframe: Bool, data: Data)
     case heartbeat(sendTimeUs: UInt64)
-    case status(thermal: UInt8, battery: UInt8, charging: Bool, bitrateKbps: UInt32, fpsX100: UInt16)
+    case status(thermal: UInt8, battery: UInt8, charging: Bool, bitrateKbps: UInt32, fpsX100: UInt16, cameraId: UInt8)
     case error(code: UInt16, message: String)
     case unknown(type: UInt8)
 }
@@ -182,8 +182,8 @@ extension Message {
             p.u64(pts); p.u8(key ? 1 : 0); p.bytes(data)
         case let .heartbeat(t):
             p.u64(t)
-        case let .status(thermal, battery, charging, bitrate, fps):
-            p.u8(thermal); p.u8(battery); p.u8(charging ? 1 : 0); p.u32(bitrate); p.u16(fps)
+        case let .status(thermal, battery, charging, bitrate, fps, camera):
+            p.u8(thermal); p.u8(battery); p.u8(charging ? 1 : 0); p.u32(bitrate); p.u16(fps); p.u8(camera)
         case let .error(code, message):
             p.u16(code); p.str(message)
         }
@@ -241,7 +241,9 @@ extension Message {
         case .heartbeat:
             msg = .heartbeat(sendTimeUs: r.u64())
         case .status:
-            msg = .status(thermal: r.u8(), battery: r.u8(), charging: r.u8() != 0, bitrateKbps: r.u32(), fpsX100: r.u16())
+            let thermal = r.u8(), battery = r.u8(), charging = r.u8() != 0, bitrate = r.u32(), fps = r.u16()
+            let camera: UInt8 = r.remaining >= 1 ? r.u8() : 255  // optional trailing field
+            msg = .status(thermal: thermal, battery: battery, charging: charging, bitrateKbps: bitrate, fpsX100: fps, cameraId: camera)
         case .error:
             msg = .error(code: r.u16(), message: r.str())
         case .none:

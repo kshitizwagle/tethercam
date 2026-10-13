@@ -33,6 +33,27 @@ const char* StatusName(shm::AgentStatus s) {
     return "?";
 }
 
+// User choices that survive reconnects and restarts: HKCU\Software\Tethercam.
+constexpr wchar_t kSettingsKey[] = L"Software\\Tethercam";
+
+std::string ReadSetting(const wchar_t* name) {
+    wchar_t buf[256];
+    DWORD size = sizeof(buf);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, name, RRF_RT_REG_SZ, nullptr, buf, &size) != ERROR_SUCCESS)
+        return {};
+    const int n = WideCharToMultiByte(CP_UTF8, 0, buf, -1, nullptr, 0, nullptr, nullptr);
+    std::string s(size_t(n > 0 ? n - 1 : 0), '\0');
+    if (n > 1) WideCharToMultiByte(CP_UTF8, 0, buf, -1, s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+void WriteSetting(const wchar_t* name, const std::string& value) {
+    const int n = MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, nullptr, 0);
+    std::wstring w(size_t(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, w.data(), n);
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, name, REG_SZ, w.c_str(), DWORD(w.size() * sizeof(wchar_t)));
+}
+
 bool SleepUnless(const std::atomic<bool>& stop, int ms) {
     for (int t = 0; t < ms && !stop; t += 50) Sleep(50);
     return !stop;
@@ -43,6 +64,12 @@ bool SleepUnless(const std::atomic<bool>& stop, int ms) {
 void Engine::Start(std::function<void()> on_change) {
     on_change_ = std::move(on_change);
     stop_ = false;
+    {
+        std::lock_guard lock(mu_);
+        preferred_camera_ = ReadSetting(L"Camera");
+        snap_.mirror = ReadSetting(L"Mirror") == "1";
+        snap_.rotation = static_cast<uint16_t>(std::atoi(ReadSetting(L"Rotation").c_str()) % 360);
+    }
     thread_ = std::thread([this] { Run(); });
 }
 
@@ -61,8 +88,19 @@ void Engine::SelectCamera(int camera_id) {
     {
         std::lock_guard lock(mu_);
         snap_.selected_camera = camera_id;
+        RememberCameraLocked();
     }
     camera_dirty_ = true;
+    Notify();
+}
+
+void Engine::RememberCameraLocked() {
+    for (const auto& c : snap_.cameras) {
+        if (c.camera_id == snap_.selected_camera) {
+            preferred_camera_ = c.label;
+            WriteSetting(L"Camera", c.label);
+        }
+    }
 }
 
 void Engine::SetMirror(bool mirror) {
@@ -70,7 +108,9 @@ void Engine::SetMirror(bool mirror) {
         std::lock_guard lock(mu_);
         snap_.mirror = mirror;
     }
+    WriteSetting(L"Mirror", mirror ? "1" : "0");
     options_dirty_ = true;
+    Notify();
 }
 
 void Engine::SetRotation(uint16_t degrees) {
@@ -78,7 +118,9 @@ void Engine::SetRotation(uint16_t degrees) {
         std::lock_guard lock(mu_);
         snap_.rotation = degrees;
     }
+    WriteSetting(L"Rotation", std::to_string(degrees));
     options_dirty_ = true;
+    Notify();
 }
 
 bool Engine::CopyPreview(image::Nv12Frame& out, uint64_t& seq) const {
@@ -306,6 +348,10 @@ void Engine::RunSession(net::Socket& sock) {
                 {
                     std::lock_guard lock(mu_);
                     snap_.cameras = caps->cameras;
+                    // Restore the lens the user picked last time (by label: ids are per connection).
+                    snap_.selected_camera = -1;
+                    for (const auto& c : caps->cameras)
+                        if (!preferred_camera_.empty() && c.label == preferred_camera_) snap_.selected_camera = c.camera_id;
                 }
                 for (const auto& c : caps->cameras) {
                     std::string list;
@@ -362,6 +408,23 @@ void Engine::RunSession(net::Socket& sock) {
                 }
             } else if (auto st = std::get_if<proto::Status>(&m)) {
                 if (st->thermal_state >= 2) log::Warn("iPhone thermal state {} (serious or worse)", st->thermal_state);
+                if (st->camera_id != 255) {
+                    // The lens may have been switched on the phone: follow and remember it.
+                    bool changed = false;
+                    {
+                        std::lock_guard lock(mu_);
+                        if (snap_.selected_camera != st->camera_id) {
+                            snap_.selected_camera = st->camera_id;
+                            RememberCameraLocked();
+                            changed = true;
+                        }
+                    }
+                    if (changed) {
+                        camera_id = st->camera_id;
+                        log::Info("lens changed on the iPhone to camera {}", camera_id);
+                        Notify();
+                    }
+                }
             } else if (auto e = std::get_if<proto::Error>(&m)) {
                 log::Warn("device error {}: {}", unsigned(e->code), e->message);
                 if (e->code == proto::ErrorCode::CameraUnavailable || e->code == proto::ErrorCode::ThermalShutdown) {

@@ -21,8 +21,13 @@ final class Session: @unchecked Sendable {
     private let encoder = H264Encoder()
     private var parser = StreamParser()
 
-    // Requested by the host.
-    private var cameraId: UInt8 = 0
+    // Requested by the host (or picked on the phone); the lens is remembered across launches.
+    private static let cameraKey = "selectedCamera"
+    private var cameraId: UInt8 = UInt8(clamping: UserDefaults.standard.integer(forKey: Session.cameraKey)) {
+        didSet { UserDefaults.standard.set(Int(cameraId), forKey: Session.cameraKey) }
+    }
+    private var mirror = false
+    private var rotation: UInt16 = 0
     private var format = (width: UInt16(1920), height: UInt16(1080), fps: UInt16(30))
     private var requestedBitrate: UInt32 = 0
     private var streaming = false
@@ -43,6 +48,8 @@ final class Session: @unchecked Sendable {
     var onStats: ((Stats) -> Void)?
     /// Called on the main queue when the host changes lens or the dim option.
     var onRemoteChange: ((UInt8, Bool) -> Void)?
+    /// Called on the main queue when the host changes mirroring.
+    var onRemoteMirror: ((Bool) -> Void)?
 
     private static let backpressureSeconds = 0.25
 
@@ -92,6 +99,17 @@ final class Session: @unchecked Sendable {
             self?.queue.async { self?.thermalChanged() }
         }
         UIDevice.current.isBatteryMonitoringEnabled = true
+    }
+
+    /// Lens in use when the app starts (remembered from last time).
+    var initialCamera: UInt8 { queue.sync { cameraId } }
+
+    /// Mirror toggled on the phone.
+    func setMirror(_ on: Bool) {
+        queue.async { [self] in
+            mirror = on
+            camera.setOptions(mirror: mirror, rotation: rotation)
+        }
     }
 
     /// Lens picked on the phone.
@@ -166,7 +184,10 @@ final class Session: @unchecked Sendable {
             encoder.requestKeyframe()
             dropUntilKeyframe = true
         case let .setOptions(mirror, rotation, dim):
+            self.mirror = mirror
+            self.rotation = rotation
             camera.setOptions(mirror: mirror, rotation: rotation)
+            DispatchQueue.main.async { [weak self] in self?.onRemoteMirror?(mirror) }
             configSent = false  // size may change with rotation; the encoder will emit a new config
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -298,7 +319,8 @@ final class Session: @unchecked Sendable {
                 let charging = UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full
                 if self.streaming {
                     self.send(.status(thermal: Self.thermalByte(), battery: battery < 0 ? 255 : UInt8(battery * 100),
-                                      charging: charging, bitrateKbps: UInt32(kbps), fpsX100: UInt16(min(65535, fps * 100))))
+                                      charging: charging, bitrateKbps: UInt32(kbps), fpsX100: UInt16(min(65535, fps * 100)),
+                                      cameraId: self.cameraId))
                 }
                 self.update { $0.fps = fps; $0.mbps = kbps / 1000 }
                 self.windowStart = now

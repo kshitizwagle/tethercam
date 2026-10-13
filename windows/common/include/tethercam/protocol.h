@@ -124,6 +124,7 @@ struct Status {
     uint8_t charging = 0;
     uint32_t actual_bitrate_kbps = 0;
     uint16_t actual_fps_x100 = 0;
+    uint8_t camera_id = 255;  // lens in use (appended in 0.1.4); 255 = unknown / old device
 };
 
 struct Error {

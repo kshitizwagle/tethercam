@@ -34,7 +34,8 @@ targets:
         UIStatusBarHidden: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # Portrait-only UI like the Camera app; icons rotate instead, and capture follows the phone.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIApplicationSupportsIndirectInputEvents: true
   TethercamTests:
     type: bundle.unit-test

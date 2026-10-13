@@ -93,6 +93,7 @@ void WritePayload(ByteWriter& w, const Message& msg) {
                        w.U8(m.charging);
                        w.U32(m.actual_bitrate_kbps);
                        w.U16(m.actual_fps_x100);
+                       w.U8(m.camera_id);
                    },
                    [&](const Error& m) {
                        w.U16(uint16_t(m.code));
@@ -220,6 +221,7 @@ std::optional<Message> DecodePayload(uint8_t type, std::span<const uint8_t> payl
         m.charging = r.U8();
         m.actual_bitrate_kbps = r.U32();
         m.actual_fps_x100 = r.U16();
+        if (r.Remaining() >= 1) m.camera_id = r.U8();  // optional trailing field
         out = m;
         break;
     }
