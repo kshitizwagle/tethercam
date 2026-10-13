@@ -42,11 +42,34 @@ status card is opt-in from the tray menu), so the overlay decides what viewers s
 | `state` | `live` (video flowing), `connected` (phone connected, no app using the camera), `no_iphone` (no iPhone on USB), `app_not_open` (iPhone found, Tethercam app closed/locked), `paused` (app in background or phone locked), `no_apple_driver` (Apple Devices not installed), `starting` |
 | `live` | `true` only while frames are flowing. **Use this to show/hide your camera frame** |
 | `device` | iPhone name |
-| `camera`, `lens` | Lens in use: `wide`, `ultra_wide`, `telephoto`, `front` |
-| `width`, `height`, `fps` | Format being streamed (0 when not live) |
+| `camera` | Human-readable camera label; empty before a camera is selected |
+| `lens` | `wide`, `ultra_wide`, `telephoto`, `front`; empty before a camera is selected |
+| `width`, `height`, `fps` | Source stream dimensions and rounded measured receive fps, not necessarily the consumer's scaled output format; zero when idle after the next status update |
 | `mirror`, `rotation` | Current picture options |
 | `detail` | Human-readable summary |
 | `thermal`, `battery`, `charging` | iPhone thermal state (0 nominal, 1 fair, 2 serious, 3 critical; -1 unknown), battery percent (-1 unknown), charging. Updated every 2 s while live |
+| `version` | Windows agent build version (the example is illustrative) |
+| `quality` | Selected capture preference: `Auto`, `1080p / 30 fps`, `1080p / 60 fps`, `4K / 30 fps`, `4K / 60 fps`. Actual source dimensions and measured fps remain in `width`, `height`, `fps`; older agents omit this field |
+
+## Timing and connection behavior
+
+`live` is computed from the agent's streaming state and a positive measured frame rate. It is a
+sampled indicator, not a per-frame signal: statistics update roughly once a second, and a silent
+phone connection is retried after 3 seconds. Use `live`, rather than `state == "live"`, for visibility.
+Opening the Tethercam preview window also creates demand and can make `live` true.
+
+The server sends ordinary, unnamed SSE messages with `data: <JSON>` and `retry: 1000` (a one-second
+reconnect hint). There are no event IDs or replay history; reconnecting receives a fresh snapshot.
+Ignore unknown fields and use `detail` for display only, not machine decisions. Telemetry may retain
+the last phone reading after disconnect, so check `live` before treating it as current.
+
+`GET /` aliases `/status`; query strings are ignored. Unknown paths return 404, unsupported methods
+return 405, and `OPTIONS` returns 204 with CORS headers. The service is read-only and unauthenticated;
+local processes and browser origins allowed by the browser's local-network policy can read it.
+It cannot change lenses or camera settings. Browser policy can still block access despite CORS headers.
+
+If port 4790 is occupied, the agent logs a warning and continues without its status service. Check
+the agent log when an overlay cannot connect. The overlay should show its offline state on SSE errors.
 
 ## Overlay example
 

@@ -9,9 +9,9 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 | M0 | Foundations | ✅ |
 | M1 | Risk spikes | ✅ |
 | M2 | Stream (phone → PC bytes) | ✅ |
-| M3 | Decode + preview | 🟨 hardware decode verified; real-phone latency pending |
-| M4 | Webcam MVP (1080p30) | 🟨 real iPhone verified through Frame Server; Teams/Zoom/Camera-app checks pending |
-| M5 | Full resolution | 🟨 720p–4K negotiation and scaling verified with fakephone; device tests pending |
+| M3 | Decode + preview | ✅ hardware decode verified; 1080p30 latency measured at ~101 ms mean |
+| M4 | Webcam MVP (1080p30) | 🟨 real iPhone verified through Frame Server, Camera app and Edge WebRTC; Teams/Zoom checks pending |
+| M5 | Full resolution | 🟨 real-device 4K30 verified; sustained 4K60 and thermal validation pending |
 | M6 | Robustness | 🟨 lock/unlock + replug + lens restore verified on device; sleep/resume, 1 h soak pending |
 | M7 | Release v0.1 | ✅ every green main build publishes MSI + IPA as Latest; AltStore source auto-updated |
 | M8 | Backlog | ⬜ |
@@ -47,7 +47,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 **Exit criteria:**
 - [x] Agent decodes with the MF hardware H.264 decoder into NV12 (D3D11), software fallback
 - [x] Decoded frames checked visually (`tcprobe stream --decode --snapshot`, `vcamcheck --save`) instead of a preview window
-- [ ] Glass-to-glass latency at 1080p30 measured (device; method in `docs/perf.md`)
+- [x] Glass-to-glass latency at 1080p30 measured: ~101 ms mean, 89–112 ms; strict <100 ms target not established (`docs/perf.md`)
 
 ## M4: Webcam MVP
 **Goal:** the iPhone works as a 1080p30 webcam in real apps.
@@ -74,7 +74,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 - [x] Agent kill/restart recovers without the consuming app reopening the camera
 - [ ] PC sleep/resume (manual test)
 - [ ] Two apps use Tethercam at the same time (admin; relies on Frame Server sharing)
-- [x] 1-hour soak target: 3-minute soak at 1080p30 clean with flat memory (extend to 1 h on a device)
+- [ ] 1-hour device soak result recorded; prior 3-minute simulated soak was clean with flat memory
 - [x] Parser fuzz tests run in the unit tests (CI once the remote exists)
 
 ## M7: Release v0.1
@@ -83,8 +83,8 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 - [x] MSI builds (WiX 5): Program Files install, COM + virtual camera registration, agent at login, uninstall cleanup
 - [x] MSI install / uninstall / reinstall verified (files, HKLM COM key, Run key, camera present/absent)
 - [x] iOS app: unsigned sideloadable IPA built by CI (Sideloadly/AltStore)
-- [x] User guide + troubleshooting in README
-- [x] Every green build of main is tagged `vX.Y.Z` and released with MSI + IPA + SHA256SUMS (`ci.yml`; pre-release while 0.x)
+- [x] User guide + troubleshooting, streaming/app guide, developer guide and README navigation
+- [x] Every green build of main is tagged `vX.Y.Z` and released as Latest with MSI + IPA + SHA256SUMS (`ci.yml`; docs-only pushes skip CI)
 
 ## M8: Backlog
 Audio (virtual microphone), HEVC, Windows 10 DirectShow fallback, focus/exposure, GPU scaling and shared

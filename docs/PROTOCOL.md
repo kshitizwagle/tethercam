@@ -37,11 +37,29 @@ The payload follows the header directly.
 | 0x13 | `Stop` | host → device | Stop streaming (camera may power down) |
 | 0x14 | `RequestKeyframe` | host → device | Ask for an IDR frame as soon as possible |
 | 0x15 | `SetOptions` | host → device | Mirror, rotation, preview dimming |
+| 0x16 | `SetQuality` | both | Synchronize the saved capture-quality preference |
 | 0x20 | `VideoConfig` | device → host | Codec parameters (SPS/PPS) for the frames that follow |
 | 0x21 | `VideoFrame` | device → host | One encoded access unit |
 | 0x30 | `Heartbeat` | both | Liveness, every 1 s |
 | 0x31 | `Status` | device → host | Thermal state, battery, actual bitrate |
 | 0x7F | `Error` | both | Report a problem |
+
+### 0x16 SetQuality
+
+One `u8 quality`: 0 = Auto, 1 = 1080p30, 2 = 1080p60, 3 = 4K30, 4 = 4K60.
+A missing value is malformed. A value this build doesn't know (a preset added by a newer peer) makes
+the receiver ignore the message, so new presets never break older peers. Unknown trailing bytes are ignored.
+
+The device sends its saved quality after Hello and before Caps, and again when the phone UI changes
+it. The host adopts it unless a local desktop change is pending. A host-side change sends SetQuality
+to the device (which persists it without echoing). When streaming is wanted, the host resolves the
+preference against the selected lens's Caps, then sends Stop, SetCamera, SetOptions, SetFormat, Start.
+SetQuality alone does not start capture. Auto uses consumer demand; explicit presets override source
+capture only. The virtual camera still delivers its negotiated output size/rate through scaling/pacing.
+
+The phone's saved choice wins on reconnect unless the PC has an unsent local choice. Older v1 peers
+ignore this message: an updated PC can still request a preset using SetFormat, but phone-side quality
+selection requires an updated Windows companion. Both apps should be updated for synchronized controls.
 
 ### 0x01 Hello
 

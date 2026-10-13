@@ -23,6 +23,9 @@ final class Session: @unchecked Sendable {
 
     // Requested by the host (or picked on the phone); the lens is remembered across launches.
     private static let cameraKey = "selectedCamera"
+    private static let qualityKey = "captureQuality"
+    private var quality = CaptureQuality(rawValue: UInt8(clamping: UserDefaults.standard.integer(forKey: Session.qualityKey))) ?? .auto
+    var onQualityChange: ((CaptureQuality) -> Void)?
     private var cameraId: UInt8 = UInt8(clamping: UserDefaults.standard.integer(forKey: Session.cameraKey)) {
         didSet { UserDefaults.standard.set(Int(cameraId), forKey: Session.cameraKey) }
     }
@@ -36,6 +39,7 @@ final class Session: @unchecked Sendable {
 
     // Output state.
     private var configSent = false
+    private var captureGeneration = 0
     private var lastParameterSets = Data()
     private var dropUntilKeyframe = false
     private var heartbeatTimer: DispatchSourceTimer?
@@ -106,6 +110,20 @@ final class Session: @unchecked Sendable {
 
     /// Lens in use when the app starts (remembered from last time).
     var initialCamera: UInt8 { queue.sync { cameraId } }
+    var initialQuality: CaptureQuality { queue.sync { quality } }
+
+    func selectQuality(_ value: CaptureQuality) {
+        queue.async { [self] in
+            rememberQuality(value)
+            if server.isConnected { send(.setQuality(value)) }
+        }
+    }
+
+    private func rememberQuality(_ value: CaptureQuality) {
+        quality = value
+        UserDefaults.standard.set(Int(value.rawValue), forKey: Self.qualityKey)
+        DispatchQueue.main.async { [weak self] in self?.onQualityChange?(value) }
+    }
 
     /// Mirror toggled on the phone.
     func setMirror(_ on: Bool) {
@@ -141,6 +159,8 @@ final class Session: @unchecked Sendable {
         send(.hello(minVersion: Wire.version, maxVersion: Wire.version, role: .device,
                     appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0",
                     name: device.name, model: Self.modelIdentifier()))
+        // Announce the saved preference before Caps so the host's first Start uses it.
+        send(.setQuality(quality))
         send(.caps(cameras: camera.cameras, codecs: 1))
         update { $0.connected = true; $0.message = "Connected" }
     }
@@ -174,6 +194,9 @@ final class Session: @unchecked Sendable {
             cameraId = id
             DispatchQueue.main.async { [weak self] in self?.onRemoteChange?(id, false) }
             if streaming { applyCapture() } else { startPreview() }
+        case let .setQuality(value):
+            // The host follows with SetFormat: it owns capability negotiation and output scaling.
+            rememberQuality(value)
         case let .setFormat(w, h, fps, _, bitrate):
             format = (w, h, max(1, fps))
             requestedBitrate = bitrate
@@ -215,12 +238,16 @@ final class Session: @unchecked Sendable {
 
     private func applyCapture() {
         guard !paused else { return }
+        captureGeneration += 1
+        let generation = captureGeneration
+        encoding = false
         let f = effectiveFormat()
         encoder.configure(fps: f.fps, bitrateKbps: f.bitrateKbps)
         configSent = false
         camera.start(cameraId: cameraId, width: format.width, height: format.height, fps: UInt16(f.fps)) { [weak self] ok in
             guard let self else { return }
             self.queue.async {
+                guard generation == self.captureGeneration, self.streaming, !self.paused else { return }
                 if ok {
                     self.encoding = self.streaming
                     self.update { $0.streaming = true; $0.width = Int(self.format.width); $0.height = Int(self.format.height); $0.message = "Streaming" }
@@ -232,6 +259,7 @@ final class Session: @unchecked Sendable {
     }
 
     private func stopStreaming() {
+        captureGeneration += 1
         streaming = false
         encoding = false
         encoder.invalidate()

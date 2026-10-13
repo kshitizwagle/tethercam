@@ -192,6 +192,9 @@ void PreviewWindow::Layout(const Snapshot& s, float w, float h) {
             x += pill + gap;
         }
     }
+    // Quality has its own row below the live chip, clear of lens and framing controls.
+    buttons_.push_back({D2D1::RectF(16, 54, 246, 98), Action::Quality, -1,
+                        L"Quality: " + Widen(QualityLabel(s.quality)), false, false});
     // Left: mirror, rotate. Right: switch camera.
     const float r = 22;
     buttons_.push_back({D2D1::RectF(24, cy - r, 24 + 2 * r, cy + r), Action::Mirror, -1, kIconMirror, s.mirror, true});
@@ -216,6 +219,9 @@ void PreviewWindow::Click(float x, float y) {
     if (!b) return;
     const Snapshot s = engine_.Get();
     switch (b->action) {
+    case Action::Quality:
+        ShowQualityMenu();
+        break;
     case Action::Lens:
         engine_.SelectCamera(b->camera_id);
         break;
@@ -240,6 +246,30 @@ void PreviewWindow::Click(float x, float y) {
         break;
     }
     }
+}
+
+void PreviewWindow::ShowQualityMenu() {
+    const auto s = engine_.Get();
+    HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"Capture quality (video apps choose output size)");
+    const proto::Camera* camera = nullptr;
+    for (const auto& c : s.cameras)
+        if (c.camera_id == s.selected_camera) camera = &c;
+    for (UINT i = 0; i <= 4; ++i) {
+        const auto q = proto::Quality(i);
+        const bool supported = !camera || SupportsQuality(camera->formats, q);
+        const std::wstring label = i == 0 ? L"Auto (match video app)" : Widen(QualityLabel(q));
+        AppendMenuW(menu, MF_STRING | (s.quality == q ? MF_CHECKED : 0) | (supported ? 0 : MF_GRAYED),
+                    i + 1, label.c_str());
+    }
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"4K uses more power and can warm your phone");
+    POINT pt{LONG(16 * dpi_scale_), LONG(98 * dpi_scale_)};
+    ClientToScreen(hwnd_, &pt);
+    const UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, nullptr);
+    DestroyMenu(menu);
+    if (cmd >= 1 && cmd <= 5) engine_.SetQuality(proto::Quality(cmd - 1));
+    last_mouse_ms_ = GetTickCount64();
 }
 
 void PreviewWindow::Render() {
@@ -359,7 +389,12 @@ void PreviewWindow::Render() {
             const float cx = (b.rect.left + b.rect.right) / 2, cy = (b.rect.top + b.rect.bottom) / 2;
             const float rx = (b.rect.right - b.rect.left) / 2 * scale, ry = (b.rect.bottom - b.rect.top) / 2 * scale;
             const D2D1_RECT_F box = D2D1::RectF(cx - rx, cy - ry, cx + rx, cy + ry);
-            if (b.round) {
+            if (b.action == Action::Quality) {
+                brush_->SetColor(Rgba(0x1C1C1E, 0.92f * chrome_));
+                target_->FillRoundedRectangle(D2D1::RoundedRect(box, 6, 6), brush_.get());
+                brush_->SetColor(Rgba(0xFFFFFF, chrome_));
+                target_->DrawTextW(b.text.c_str(), UINT32(b.text.size()), small_font_.get(), box, brush_.get());
+            } else if (b.round) {
                 // Glass button: translucent fill, brighter when on or hovered.
                 D2D1_COLOR_F fill = Mix(Rgba(0x3A3A3C, 0.55f), Rgba(0x8E8E93, 0.65f), a.active);
                 fill = Mix(fill, Rgba(0x8E8E93, 0.75f), a.hover * 0.5f);
@@ -400,6 +435,12 @@ LRESULT CALLBACK PreviewWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             y = GET_Y_LPARAM(l) / self->dpi_scale_;
         };
         switch (msg) {
+        case WM_KEYDOWN:
+            if (wp == 'Q' || wp == VK_F10) {
+                self->ShowQualityMenu();
+                return 0;
+            }
+            break;
         case WM_TIMER:
             self->Tick();
             return 0;

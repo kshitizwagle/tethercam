@@ -36,7 +36,7 @@ final class WireTests: XCTestCase {
 
     func testAllVectorsRoundTrip() throws {
         let v = try vectors()
-        XCTAssertEqual(v.count, 13)
+        XCTAssertEqual(v.count, 18)
         for (name, bytes) in v {
             let m = try decodeOne(bytes)
             XCTAssertEqual(m.encoded(), bytes, name)
@@ -53,6 +53,20 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(pts, 1_000_000)
         XCTAssertTrue(key)
         XCTAssertEqual([UInt8](data), [0, 0, 0, 1, 0x65, 0x88])
+    }
+
+    func testQualityPresetsAndValidation() throws {
+        let formats = [VideoFormat(width: 1920, height: 1080, maxFps: 60),
+                       VideoFormat(width: 3840, height: 2160, maxFps: 30)]
+        XCTAssertTrue(CaptureQuality.auto.isSupported(by: []))
+        XCTAssertTrue(CaptureQuality.hd60.isSupported(by: formats))
+        XCTAssertTrue(CaptureQuality.uhd30.isSupported(by: formats))
+        XCTAssertFalse(CaptureQuality.uhd60.isSupported(by: formats))
+        for quality in CaptureQuality.allCases {
+            XCTAssertEqual(try decodeOne(Message.setQuality(quality).encoded()), .setQuality(quality))
+        }
+        XCTAssertNil(Message.decode(type: 0x16, payload: Data()))
+        XCTAssertEqual(Message.decode(type: 0x16, payload: Data([5])), .unknown(type: 0x16))  // newer preset: ignored
     }
 
     func testParserRejectsBadMagic() {

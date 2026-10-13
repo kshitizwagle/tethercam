@@ -26,6 +26,7 @@ enum MenuId : UINT {
     kRotate180,
     kRotate270,
     kCameraBase = 200,
+    kQualityBase = 500,
 };
 
 std::wstring Widen(const std::string& s) {
@@ -193,6 +194,18 @@ void Tray::ShowMenu() {
         }
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     }
+    HMENU quality = CreatePopupMenu();
+    const proto::Camera* selected = nullptr;
+    for (const auto& c : s.cameras)
+        if (c.camera_id == s.selected_camera) selected = &c;
+    for (UINT i = 0; i <= 4; ++i) {
+        const auto q = proto::Quality(i);
+        const bool supported = !selected || SupportsQuality(selected->formats, q);
+        const auto label = i == 0 ? L"Auto (match video app)" : Widen(QualityLabel(q));
+        AppendMenuW(quality, MF_STRING | (s.quality == q ? MF_CHECKED : 0) | (supported ? 0 : MF_GRAYED),
+                    kQualityBase + i, label.c_str());
+    }
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(quality), L"Capture quality");
     AppendMenuW(menu, MF_STRING | (s.mirror ? MF_CHECKED : 0), kMirror, L"Mirror");
     HMENU rotate = CreatePopupMenu();
     const std::pair<UINT, uint16_t> rotations[] = {
@@ -219,7 +232,8 @@ void Tray::ShowMenu() {
     else if (cmd == kOpenLogs) ShellExecuteW(nullptr, L"open", log_dir_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     else if (cmd == kMirror) engine_.SetMirror(!s.mirror);
     else if (cmd >= kRotate0 && cmd <= kRotate270) engine_.SetRotation(uint16_t((cmd - kRotate0) * 90));
-    else if (cmd >= kCameraBase) engine_.SelectCamera(int(cmd - kCameraBase));
+    else if (cmd >= kQualityBase && cmd <= kQualityBase + 4) engine_.SetQuality(proto::Quality(cmd - kQualityBase));
+    else if (cmd >= kCameraBase && cmd < kCameraBase + 256) engine_.SelectCamera(int(cmd - kCameraBase));
 }
 
 void Tray::ShowPreview() {

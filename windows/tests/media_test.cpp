@@ -1,9 +1,37 @@
 #include <gtest/gtest.h>
 
 #include "tethercam/annexb.h"
+#include "tethercam/formats.h"
 #include "tethercam/image.h"
 
 using namespace tethercam;
+
+TEST(Quality, OverridesCaptureWithoutChangingConsumerOutput) {
+    const MediaFormat consumer{1920, 1080, 30};
+    const proto::Format caps[] = {{1920, 1080, 60}, {3840, 2160, 60}};
+    MediaFormat capture;
+    ASSERT_TRUE(ChooseDeviceFormat(caps, QualityFormat(proto::Quality::UHD60, consumer), capture));
+    EXPECT_EQ(capture, (MediaFormat{3840, 2160, 60}));
+    ASSERT_TRUE(ChooseDeviceFormat(caps, QualityFormat(proto::Quality::Auto, consumer), capture));
+    EXPECT_EQ(capture, consumer);
+    ASSERT_TRUE(ChooseDeviceFormat(caps, QualityFormat(proto::Quality::HD60, consumer), capture));
+    EXPECT_EQ(capture, (MediaFormat{1920, 1080, 60}));
+}
+
+TEST(Quality, LensCapabilitiesLimitPresetsAndFallbackRate) {
+    const proto::Format caps[] = {{1920, 1080, 60}, {3840, 2160, 30}};
+    EXPECT_TRUE(SupportsQuality({}, proto::Quality::Auto));
+    EXPECT_TRUE(SupportsQuality(caps, proto::Quality::HD60));
+    EXPECT_TRUE(SupportsQuality(caps, proto::Quality::UHD30));
+    EXPECT_FALSE(SupportsQuality(caps, proto::Quality::UHD60));
+    EXPECT_FALSE(SupportsQuality({}, proto::Quality::UHD60));
+    MediaFormat capture;
+    ASSERT_TRUE(ChooseDeviceFormat(caps, QualityFormat(proto::Quality::UHD60, {}), capture));
+    EXPECT_EQ(capture, (MediaFormat{3840, 2160, 30}));
+    const proto::Format front[] = {{1920, 1080, 30}};
+    ASSERT_TRUE(ChooseDeviceFormat(front, QualityFormat(proto::Quality::UHD60, {}), capture));
+    EXPECT_EQ(capture, (MediaFormat{1920, 1080, 30}));
+}
 
 TEST(AnnexB, SplitsAndClassifies) {
     const std::vector<uint8_t> au = {0, 0, 0, 1, 0x67, 1, 2, 0, 0, 1, 0x68, 3, 0, 0, 0, 1, 0x65, 9, 9};

@@ -5,6 +5,34 @@
 
 namespace tethercam {
 
+MediaFormat QualityFormat(proto::Quality quality, const MediaFormat& automatic) {
+    switch (quality) {
+    case proto::Quality::HD30: return {1920, 1080, 30};
+    case proto::Quality::HD60: return {1920, 1080, 60};
+    case proto::Quality::UHD30: return {3840, 2160, 30};
+    case proto::Quality::UHD60: return {3840, 2160, 60};
+    default: return automatic;
+    }
+}
+
+const char* QualityLabel(proto::Quality quality) {
+    switch (quality) {
+    case proto::Quality::HD30: return "1080p / 30 fps";
+    case proto::Quality::HD60: return "1080p / 60 fps";
+    case proto::Quality::UHD30: return "4K / 30 fps";
+    case proto::Quality::UHD60: return "4K / 60 fps";
+    default: return "Auto";
+    }
+}
+
+bool SupportsQuality(std::span<const proto::Format> caps, proto::Quality quality) {
+    if (quality == proto::Quality::Auto) return true;
+    const auto want = QualityFormat(quality, {});
+    for (const auto& f : caps)
+        if (f.width == want.width && f.height == want.height && f.max_fps >= want.fps) return true;
+    return false;
+}
+
 std::span<const MediaFormat> AdvertisedFormats() {
     // 1080p30 first: it's the default most apps pick when they take the first type.
     static constexpr MediaFormat kFormats[] = {

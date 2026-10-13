@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published var selectedCamera: UInt8 = 0
     @Published var mirrored = false
     @Published var dimmed = false
+    @Published var quality: CaptureQuality = .auto
     @Published var permission: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     /// Rotation for icons and labels so they stay upright while the UI is locked to portrait,
     /// like the Camera app.
@@ -55,6 +56,8 @@ final class AppModel: ObservableObject {
         guard !started else { return }
         started = true
         cameras = session.camera.cameras
+        quality = session.initialQuality
+        session.onQualityChange = { [weak self] value in self?.quality = value }
         let remembered = session.initialCamera
         selectedCamera = cameras.contains(where: { $0.id == remembered }) ? remembered : (cameras.first?.id ?? 0)
         session.onStats = { [weak self] stats in self?.stats = stats }
@@ -106,6 +109,12 @@ final class AppModel: ObservableObject {
     func toggleMirror() {
         mirrored.toggle()
         session.setMirror(mirrored)
+    }
+
+    func selectQuality(_ value: CaptureQuality) {
+        guard value.isSupported(by: current?.formats ?? []) else { return }
+        quality = value
+        session.selectQuality(value)
     }
 
     var liveText: String {

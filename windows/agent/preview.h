@@ -28,7 +28,7 @@ public:
     bool Visible() const { return hwnd_ && IsWindowVisible(hwnd_); }
 
 private:
-    enum class Action { Lens, Flip, Mirror, Rotate };
+    enum class Action { Lens, Flip, Mirror, Rotate, Quality };
     struct Button {
         D2D1_RECT_F rect;
         Action action;
@@ -47,6 +47,7 @@ private:
     bool CreateDeviceResources();
     void Layout(const Snapshot& s, float width, float height);
     void Click(float x, float y);
+    void ShowQualityMenu();
     const Button* HitTest(float x, float y) const;
     static int Key(const Button& b) { return int(b.action) * 64 + b.camera_id + 1; }
 

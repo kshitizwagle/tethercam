@@ -4,10 +4,13 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 [MILESTONES.md](MILESTONES.md).
 
 ## Next up
+- [x] Synchronized quality menus on iPhone, Windows preview and tray: Auto, 1080p30/60, 4K30/60; capture overrides, persistence and capability fallback
+- [ ] Build the updated iPhone app on macOS/CI and validate quality switching on the iPhone 15 Pro Max front camera; local Swift protocol checks pass, UIKit/AVFoundation build pending
 - [x] App installed via the AltStore source; permission prompt, preview, auto-rotation, Camera-app UI verified (0.1.4)
 - [x] Real-device streaming through the virtual camera; lens memory across replug
-- [ ] Pick "Tethercam" in the Windows Camera app, Teams, Zoom, OBS; fill `docs/compat.md`
-- [ ] Latency, 4K60, thermals, unplug/lock/background recovery; fill `docs/perf.md`
+- [ ] Direct Teams, Zoom and OBS checks; complete the format matrix in `docs/compat.md` (Camera, Edge and Streamlabs spot checks recorded)
+- [ ] Retest 4K60 with iPhone app 0.1.9 or newer, then record 30-minute thermals and 4K30 latency in `docs/perf.md`
+- [ ] Rerun the 1-hour soak: the first attempt ran 26 min (12 min live, clean) before the setup changed (see `docs/perf.md`). PC sleep/resume and two independent camera clients remain unverified
 - [x] Camera registered machine-wide; Frame Server path verified (2026-10-13)
 - [x] iPhone visible over USB (`type=USB`, product 0x12a8) after Trust; usbmuxd Connect reaches the phone
 - [x] GitHub repo public, CI green (Windows + iOS)
@@ -15,17 +18,17 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 ## M1: Risk spikes
 - [x] usbmuxd client (`common/usbmux`) + `tcprobe list` against Apple Devices 1.1540
 - [x] `tcprobe echo` (Windows side of the echo spike)
-- [ ] iOS echo: the real app's server is used instead of a separate echo app; verify a 100 MB round trip with a debug echo mode, or skip in favour of `tcprobe stream`
+- [x] USB transport verified with real-device `tcprobe stream`; separate echo spike superseded (M1)
 - [x] Media source DLL (WRL) with placeholder and live frames; verified in-process
 - [x] Register/remove via `MFCreateVirtualCamera` (`tethercam-agent --install/--uninstall/--session-camera`)
-- [ ] Confirm Frame Server loads the DLL and the camera plays in the Windows Camera app (admin)
+- [x] Frame Server loads the DLL; the Windows Camera app shows live iPhone video (2026-10-13)
 - [x] Shared memory + events with SDDL (fixed: GX for SYNCHRONIZE)
 
 ## M2: Stream
 - [x] Golden protocol vectors in `docs/protocol-vectors/v1.txt`
 - [x] C++ protocol codec + tests (incl. fuzz)
 - [x] C++ minimal plist + usbmux client + tests
-- [x] Swift protocol codec + tests on the same vectors (not compiled yet)
+- [x] Swift protocol codec + tests on the same vectors (macOS CI)
 - [x] iOS `CameraController`: lens discovery, caps, format selection, rotation/mirror
 - [x] iOS `H264Encoder`: VideoToolbox low-latency, forced IDR, Annex-B, SPS/PPS
 - [x] iOS `Session`: state machine, heartbeat, status, backpressure, thermal policy, background pause
@@ -37,7 +40,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 - [x] Agent session loop (Hello, Caps, SetCamera/SetFormat/Start, reconnect)
 - [x] MF H.264 decoder with D3D11 hardware path + software fallback, low-latency mode
 - [x] Decode errors → flush + RequestKeyframe
-- [ ] Latency measurement with a real iPhone (`docs/perf.md`)
+- [x] 1080p30 latency measurement with a real iPhone: mean ~101 ms, range 89–112 ms (`docs/perf.md`); 4K30 pending
 
 ## M4: Webcam MVP
 - [x] `windows/vcam`: Activator / MediaSource / MediaStream, pacing, allocator support
@@ -66,13 +69,15 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 
 ## M7: Release v0.1
 - [x] WiX 5 MSI (`windows/installer`), built locally; CI job builds it
-- [x] User guide + troubleshooting in README
+- [x] User guide, streaming/app guide, developer guide and README navigation; design and status API aligned with source
 - [x] Install/uninstall/reinstall test (fixed: launch condition used msiexec's Windows 8.1 compat version)
 - [ ] Code signing decision (unsigned MSI triggers SmartScreen)
 - [ ] iOS distribution decision (Q5: TestFlight needs a paid account)
 - [x] Release workflow with checksums (MSI + unsigned IPA); pre-release tag v0.1.0-alpha.1
 
 ## Session log
+- 2026-10-13 (5): Added capture quality controls to both apps and a backward-compatible SetQuality protocol message. Added per-lens availability, reconnect policy, source-format reporting and stale capture-completion guards. Windows Debug build and 37 tests pass, including actual engine-loop synchronization/reconnect tests; Swift 6 standalone protocol check passes all 18 golden vectors and quality validation, and changed UI/session files pass syntax parsing. Release companion built at `build/quality-release/agent/Release/tethercam-agent.exe` because the usual Release executable is locked by a running process. Device/UI testing and full iOS build remain pending. Changes are local, uncommitted and not installed/published.
+- 2026-10-13 (4): Resumed Claude session 7aa00575-0b51-4328-807d-61ebfe13eca4 after its documentation pass was interrupted. Completed USER_GUIDE, STREAMING, DEVELOPMENT and README; corrected DESIGN and STATUS_API against source and CI. Reconciled recorded latency/app checks without treating Edge as a Teams test or preview demand as a second virtual-camera client. 4K60 retest, 1-hour soak result and sleep/resume remain open. Documentation/link checks only; no new hardware tests.
 - 2026-10-13 (3): Real iPhone 15 Pro Max verified over USB (1080p30/60, 4K30 through Frame Server). Fixed: AltStore install (ad-hoc signed IPA), permission prompt, phone preview, upside-down image (auto-rotation), lens reset on reconnect (Status.camera_id + saved choice). Added: Windows preview window with Camera-app controls (Fluent icons, eased motion), Camera-app-style iPhone UI, AltStore source, releases marked Latest.
 - 2026-10-13 (2): One `ci` workflow builds Windows + iOS; when both pass on main it tags the next vX.Y.Z (patch bump, `[minor]`/`[major]` in the commit message) and publishes MSI + IPA + checksums; docs-only pushes skip CI. Version is stamped into the binaries, MSI and IPA. Replaces the manual-tag release.yml.
 - 2026-10-13: Camera registered (elevated) and verified through Frame Server; MSI install/uninstall verified; repo published, CI green incl. Swift build + tests; CI builds a sideloadable unsigned IPA; release workflow added.

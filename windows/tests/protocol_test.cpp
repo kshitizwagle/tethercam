@@ -47,7 +47,7 @@ Message DecodeOne(const std::vector<uint8_t>& frame) {
 
 }  // namespace
 
-TEST(Protocol, VectorsFileHasAllTypes) { EXPECT_EQ(LoadVectors().size(), 13u); }
+TEST(Protocol, VectorsFileHasAllTypes) { EXPECT_EQ(LoadVectors().size(), 18u); }
 
 TEST(Protocol, EveryVectorRoundTrips) {
     for (const auto& [name, bytes] : LoadVectors()) {
@@ -107,6 +107,20 @@ TEST(Protocol, ParserHandlesByteAtATimeDelivery) {
     EXPECT_EQ(got, (std::vector<std::string>{"VideoFrame", "Heartbeat"}));
 }
 
+TEST(Protocol, QualityValidatesAndPreservesWireValues) {
+    for (uint8_t i = 0; i <= 4; ++i) {
+        auto msg = DecodeOne(Encode(SetQuality{Quality(i)}));
+        EXPECT_EQ(std::get<SetQuality>(msg).quality, Quality(i));
+        EXPECT_STREQ(TypeName(msg), "SetQuality");
+    }
+    EXPECT_FALSE(DecodePayload(0x16, {}).has_value());
+    // A preset from a newer peer is ignored rather than tearing down the connection.
+    const uint8_t newer[] = {5};
+    const auto msg = DecodePayload(0x16, newer);
+    ASSERT_TRUE(msg.has_value());
+    EXPECT_EQ(std::get<Unknown>(*msg).type, 0x16);
+}
+
 TEST(Protocol, UnknownTypeIsSkipped) {
     std::vector<uint8_t> frame = {'T', 'C', 'A', 'M', 1, 0x55, 0, 0, 3, 0, 0, 0, 1, 2, 3};
     auto hb = Encode(Heartbeat{1});
@@ -153,7 +167,7 @@ TEST(Protocol, FuzzRandomPayloadsNeverCrash) {
     for (int i = 0; i < 20000; ++i) {
         std::vector<uint8_t> payload(rng() % 64);
         for (auto& b : payload) b = uint8_t(rng());
-        const uint8_t types[] = {0x01, 0x02, 0x10, 0x11, 0x15, 0x20, 0x21, 0x30, 0x31, 0x7F};
+        const uint8_t types[] = {0x01, 0x02, 0x10, 0x11, 0x15, 0x16, 0x20, 0x21, 0x30, 0x31, 0x7F};
         (void)DecodePayload(types[rng() % std::size(types)], payload);
     }
     for (int i = 0; i < 2000; ++i) {

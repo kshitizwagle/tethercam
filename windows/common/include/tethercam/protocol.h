@@ -27,6 +27,7 @@ enum class MsgType : uint8_t {
     Stop = 0x13,
     RequestKeyframe = 0x14,
     SetOptions = 0x15,
+    SetQuality = 0x16,
     VideoConfig = 0x20,
     VideoFrame = 0x21,
     Heartbeat = 0x30,
@@ -137,7 +138,10 @@ struct Unknown {
     uint8_t type = 0;
 };
 
-using Message = std::variant<Hello, Caps, SetCamera, SetFormat, Start, Stop, RequestKeyframe, SetOptions,
+enum class Quality : uint8_t { Auto = 0, HD30 = 1, HD60 = 2, UHD30 = 3, UHD60 = 4 };
+struct SetQuality { Quality quality = Quality::Auto; };
+
+using Message = std::variant<Hello, Caps, SetCamera, SetFormat, Start, Stop, RequestKeyframe, SetOptions, SetQuality,
                              VideoConfig, VideoFrame, Heartbeat, Status, Error, Unknown>;
 
 // Serializes a full frame (header + payload).

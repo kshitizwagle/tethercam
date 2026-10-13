@@ -36,7 +36,7 @@ const char* StatusName(shm::AgentStatus s) {
 // User choices that survive reconnects and restarts: HKCU\Software\Tethercam.
 constexpr wchar_t kSettingsKey[] = L"Software\\Tethercam";
 
-std::string ReadSetting(const wchar_t* name) {
+std::string ReadUserSetting(const wchar_t* name) {
     wchar_t buf[256];
     DWORD size = sizeof(buf);
     if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, name, RRF_RT_REG_SZ, nullptr, buf, &size) != ERROR_SUCCESS)
@@ -47,7 +47,7 @@ std::string ReadSetting(const wchar_t* name) {
     return s;
 }
 
-void WriteSetting(const wchar_t* name, const std::string& value) {
+void WriteUserSetting(const wchar_t* name, const std::string& value) {
     const int n = MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, nullptr, 0);
     std::wstring w(size_t(n), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, w.data(), n);
@@ -61,6 +61,14 @@ bool SleepUnless(const std::atomic<bool>& stop, int ms) {
 
 }  // namespace
 
+std::string Engine::ReadSetting(const wchar_t* name) const {
+    return opt_.persist_settings ? ReadUserSetting(name) : std::string{};
+}
+
+void Engine::WriteSetting(const wchar_t* name, const std::string& value) const {
+    if (opt_.persist_settings) WriteUserSetting(name, value);
+}
+
 void Engine::Start(std::function<void()> on_change) {
     on_change_ = std::move(on_change);
     stop_ = false;
@@ -70,6 +78,9 @@ void Engine::Start(std::function<void()> on_change) {
         snap_.mirror = ReadSetting(L"Mirror") == "1";
         snap_.rotation = static_cast<uint16_t>(std::atoi(ReadSetting(L"Rotation").c_str()) % 360);
         snap_.status_card = ReadSetting(L"StatusCard") == "1";
+        const int quality = std::atoi(ReadSetting(L"Quality").c_str());
+        snap_.quality = quality >= 0 && quality <= 4 ? proto::Quality(quality) : proto::Quality::Auto;
+        quality_dirty_ = ReadSetting(L"QualityPending") == "1";
     }
     thread_ = std::thread([this] { Run(); });
 }
@@ -124,6 +135,18 @@ void Engine::SetRotation(uint16_t degrees) {
     Notify();
 }
 
+void Engine::SetQuality(proto::Quality quality) {
+    if (uint8_t(quality) > uint8_t(proto::Quality::UHD60)) return;
+    {
+        std::lock_guard lock(mu_);
+        snap_.quality = quality;
+        WriteSetting(L"Quality", std::to_string(uint8_t(quality)));
+        WriteSetting(L"QualityPending", "1");
+        quality_dirty_ = true;
+    }
+    Notify();
+}
+
 void Engine::SetStatusCard(bool on) {
     {
         std::lock_guard lock(mu_);
@@ -168,10 +191,10 @@ std::string Engine::StatusJson() const {
     }
     const bool live = snap_.status == shm::AgentStatus::Streaming && snap_.fps > 0;
     return std::format(
-        R"({{"state":"{}","live":{},"device":"{}","camera":"{}","lens":"{}","width":{},"height":{},"fps":{},"mirror":{},"rotation":{},"detail":"{}","thermal":{},"battery":{},"charging":{},"version":"{}"}})",
+        R"({{"state":"{}","live":{},"device":"{}","camera":"{}","lens":"{}","width":{},"height":{},"fps":{},"mirror":{},"rotation":{},"detail":"{}","thermal":{},"battery":{},"charging":{},"version":"{}","quality":"{}"}})",
         StateName(snap_.status), live ? "true" : "false", JsonEscape(snap_.device_name), JsonEscape(camera), lens,
         snap_.width, snap_.height, snap_.fps, snap_.mirror ? "true" : "false", snap_.rotation,
-        JsonEscape(snap_.detail), snap_.thermal, snap_.battery, snap_.charging ? "true" : "false", Version());
+        JsonEscape(snap_.detail), snap_.thermal, snap_.battery, snap_.charging ? "true" : "false", Version(), QualityLabel(snap_.quality));
 }
 
 bool Engine::CopyPreview(image::Nv12Frame& out, uint64_t& seq) const {
@@ -204,6 +227,7 @@ void Engine::SetStatus(shm::AgentStatus s, const std::string& detail) {
 
 Engine::Consumer Engine::TickShm() {
     Consumer c;
+    if (!opt_.shared_memory) return c;
     const uint64_t now = GetTickCount64();
     if (!shm_open_ && now - last_shm_try_ >= 500) {
         last_shm_try_ = now;
@@ -347,7 +371,8 @@ void Engine::RunSession(net::Socket& sock) {
         const proto::Camera* cam = choose_camera();
         if (!cam) return false;
         MediaFormat chosen;
-        if (!ChooseDeviceFormat(cam->formats, want, chosen)) return false;
+        const Snapshot s = Get();
+        if (!ChooseDeviceFormat(cam->formats, QualityFormat(s.quality, want), chosen)) return false;
         camera_id = cam->camera_id;
         proto::SetFormat sf;
         sf.width = static_cast<uint16_t>(chosen.width);
@@ -356,12 +381,12 @@ void Engine::RunSession(net::Socket& sock) {
         sf.bitrate_kbps = DefaultBitrateKbps(chosen.width, chosen.height, chosen.fps);
         log::Info("requesting {} {}x{} @ {} ({} kbps) for a {}x{} @ {} consumer", cam->label, chosen.width,
                   chosen.height, chosen.fps, sf.bitrate_kbps, want.width, want.height, want.fps);
-        Snapshot s = Get();
         proto::SetOptions opts{uint8_t(s.mirror), s.rotation, 0};
         device_format = chosen;
         target = want;
         waiting_for_key = true;
-        return send(proto::SetCamera{camera_id}) && send(opts) && send(sf) && send(proto::Start{});
+        // Stop first: avoid intermediate live reconfigurations for lens/options/format changes.
+        return send(proto::Stop{}) && send(proto::SetCamera{camera_id}) && send(opts) && send(sf) && send(proto::Start{});
     };
 
     while (!stop_) {
@@ -397,6 +422,17 @@ void Engine::RunSession(net::Socket& sock) {
                 }
                 std::lock_guard lock(mu_);
                 snap_.device_name = h->name;
+            } else if (auto quality = std::get_if<proto::SetQuality>(&m)) {
+                {
+                    std::lock_guard lock(mu_);
+                    // An explicit offline PC choice wins the next connection; otherwise use the phone.
+                    if (!quality_dirty_) {
+                        if (snap_.quality != quality->quality) camera_dirty_ = true;
+                        snap_.quality = quality->quality;
+                        WriteSetting(L"Quality", std::to_string(uint8_t(snap_.quality)));
+                    }
+                }
+                Notify();
             } else if (auto caps = std::get_if<proto::Caps>(&m)) {
                 {
                     std::lock_guard lock(mu_);
@@ -419,6 +455,7 @@ void Engine::RunSession(net::Socket& sock) {
                 decoder_ready = decoder.Init(vc->width, vc->height, vc->fps, opt_.prefer_hardware_decode);
                 waiting_for_key = true;
                 paused_on_phone = false;
+                device_format = {vc->width, vc->height, vc->fps};
                 log::Info("video: {}x{} @ {}", vc->width, vc->height, vc->fps);
             } else if (auto vf = std::get_if<proto::VideoFrame>(&m)) {
                 ++window_frames;
@@ -482,6 +519,7 @@ void Engine::RunSession(net::Socket& sock) {
                     }
                     if (changed) {
                         camera_id = st->camera_id;
+                        camera_dirty_ = true;
                         log::Info("lens changed on the iPhone to camera {}", camera_id);
                         Notify();
                     }
@@ -501,6 +539,21 @@ void Engine::RunSession(net::Socket& sock) {
         }
 
         // 2. React to what the virtual camera's consumers want.
+        if (have_caps) {
+            if (quality_dirty_) {
+                const auto quality = Get().quality;
+                // Socket writes must not hold the UI snapshot lock.
+                if (!send(proto::SetQuality{quality})) break;
+                {
+                    std::lock_guard lock(mu_);
+                    if (snap_.quality == quality) {
+                        quality_dirty_ = false;
+                        WriteSetting(L"QualityPending", "0");
+                    }
+                }
+                camera_dirty_ = true;
+            }
+        }
         Consumer consumer = TickShm();
         if (!(consumer.active && consumer.format.width) && preview_active_) {
             consumer.active = true;  // only the preview window is watching
@@ -509,7 +562,8 @@ void Engine::RunSession(net::Socket& sock) {
         if (have_caps) {
             if (consumer.active && consumer.format.width) {
                 consumer_gone_since = {};
-                if (!streaming || camera_dirty_.exchange(false) || !(consumer.format == target)) {
+                const bool capture_changed = camera_dirty_.exchange(false);
+                if (!streaming || capture_changed || !(consumer.format == target)) {
                     streaming = start_stream(consumer.format);
                     if (!streaming) {
                         log::Error("could not start the stream");

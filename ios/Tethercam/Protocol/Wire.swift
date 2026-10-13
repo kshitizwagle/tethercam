@@ -20,6 +20,7 @@ enum MessageType: UInt8 {
     case stop = 0x13
     case requestKeyframe = 0x14
     case setOptions = 0x15
+    case setQuality = 0x16
     case videoConfig = 0x20
     case videoFrame = 0x21
     case heartbeat = 0x30
@@ -54,6 +55,35 @@ struct CameraInfo: Equatable, Sendable {
     var formats: [VideoFormat]
 }
 
+enum CaptureQuality: UInt8, CaseIterable, Sendable {
+    case auto = 0, hd30, hd60, uhd30, uhd60
+
+    var label: String {
+        switch self {
+        case .auto: return "Auto"
+        case .hd30: return "1080p / 30 fps"
+        case .hd60: return "1080p / 60 fps"
+        case .uhd30: return "4K / 30 fps"
+        case .uhd60: return "4K / 60 fps"
+        }
+    }
+
+    var format: VideoFormat? {
+        switch self {
+        case .auto: return nil
+        case .hd30: return VideoFormat(width: 1920, height: 1080, maxFps: 30)
+        case .hd60: return VideoFormat(width: 1920, height: 1080, maxFps: 60)
+        case .uhd30: return VideoFormat(width: 3840, height: 2160, maxFps: 30)
+        case .uhd60: return VideoFormat(width: 3840, height: 2160, maxFps: 60)
+        }
+    }
+
+    func isSupported(by formats: [VideoFormat]) -> Bool {
+        guard let wanted = format else { return true }
+        return formats.contains { $0.width == wanted.width && $0.height == wanted.height && $0.maxFps >= wanted.maxFps }
+    }
+}
+
 enum Message: Equatable, Sendable {
     case hello(minVersion: UInt8, maxVersion: UInt8, role: Role, appVersion: String, name: String, model: String)
     case caps(cameras: [CameraInfo], codecs: UInt8)
@@ -63,6 +93,7 @@ enum Message: Equatable, Sendable {
     case stop
     case requestKeyframe
     case setOptions(mirror: Bool, rotation: UInt16, dimPreview: Bool)
+    case setQuality(CaptureQuality)
     case videoConfig(codec: UInt8, width: UInt16, height: UInt16, fps: UInt16, parameterSets: Data)
     case videoFrame(ptsUs: UInt64, keyframe: Bool, data: Data)
     case heartbeat(sendTimeUs: UInt64)
@@ -144,6 +175,7 @@ extension Message {
         case .stop: return MessageType.stop.rawValue
         case .requestKeyframe: return MessageType.requestKeyframe.rawValue
         case .setOptions: return MessageType.setOptions.rawValue
+        case .setQuality: return MessageType.setQuality.rawValue
         case .videoConfig: return MessageType.videoConfig.rawValue
         case .videoFrame: return MessageType.videoFrame.rawValue
         case .heartbeat: return MessageType.heartbeat.rawValue
@@ -170,6 +202,8 @@ extension Message {
             p.u8(codecs)
         case let .setCamera(id):
             p.u8(id)
+        case let .setQuality(quality):
+            p.u8(quality.rawValue)
         case let .setFormat(w, h, fps, codec, bitrate):
             p.u16(w); p.u16(h); p.u16(fps); p.u8(codec); p.u32(bitrate)
         case .start, .stop, .requestKeyframe, .unknown:
@@ -223,6 +257,12 @@ extension Message {
             msg = .caps(cameras: cameras, codecs: r.u8())
         case .setCamera:
             msg = .setCamera(id: r.u8())
+        case .setQuality:
+            let raw = r.u8()
+            if r.failed { return nil }
+            // A preset this build doesn't know (from a newer peer) is ignored, not fatal.
+            guard let quality = CaptureQuality(rawValue: raw) else { return .unknown(type: type) }
+            msg = .setQuality(quality)
         case .setFormat:
             msg = .setFormat(width: r.u16(), height: r.u16(), fps: r.u16(), codec: r.u8(), bitrateKbps: r.u32())
         case .start: msg = .start

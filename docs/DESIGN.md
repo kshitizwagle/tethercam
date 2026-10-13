@@ -14,9 +14,9 @@ changes shape.
 │   ├── Tethercam/
 │   │   ├── App/               TethercamApp.swift, ContentView.swift (SwiftUI)
 │   │   ├── Capture/           CameraController.swift (AVCaptureSession, lens/format selection)
-│   │   ├── Encode/            H264Encoder.swift (VTCompressionSession), AnnexB.swift
-│   │   ├── Net/               Listener.swift (NWListener), Session.swift (protocol state machine)
-│   │   └── Protocol/          Messages.swift, Codec.swift (encode/decode, mirrors PROTOCOL.md)
+│   │   ├── Encode/            H264Encoder.swift (VTCompressionSession)
+│   │   ├── Net/               Server.swift (NWListener), Session.swift (protocol state machine)
+│   │   └── Protocol/          Wire.swift (encode/decode, mirrors PROTOCOL.md)
 │   └── TethercamTests/        protocol codec + Annex-B conversion tests
 ├── windows/
 │   ├── CMakeLists.txt         top level, C++20, /W4 /permissive- /utf-8
@@ -26,27 +26,27 @@ changes shape.
 │   ├── tools/tcprobe/         stream stats + .h264 dump
 │   ├── tools/fakephone/       device simulator over TCP
 │   ├── tests/                 GoogleTest (FetchContent)
-│   └── installer/             WiX v4 project (M7)
-└── .github/workflows/         windows.yml, ios.yml
+│   └── installer/             WiX 5 MSI
+└── .github/workflows/         ci.yml orchestrates windows.yml and ios.yml
 ```
 
 ## Shared code rules
 
 - The protocol codec exists twice (Swift and C++). Both have tests built from the same golden byte vectors,
-  stored in `docs/protocol-vectors/*.hex`, so the two can't drift apart.
+  stored in `docs/protocol-vectors/v1.txt`, so the two can't drift apart.
 - `windows/common` must not depend on Media Foundation or COM, so it can be unit-tested anywhere.
 
 ## iOS app internals
 
-**Concurrency (Swift 6):**
+**Concurrency (Swift 5 language mode, targeted strict-concurrency warnings):**
 
 | Unit | Isolation | Job |
 |---|---|---|
-| `AppModel` | `@MainActor` `@Observable` | UI state: connection, lens, stats |
-| `CameraController` | actor + `sessionQueue` (serial `DispatchQueue`) | All `AVCaptureSession` configuration |
+| `AppModel` | `@MainActor`, `ObservableObject` with `@Published` properties | UI state: connection, lens, stats |
+| `CameraController` | class with `sessionQueue` (serial `DispatchQueue`) | All `AVCaptureSession` configuration |
 | capture callback | `videoQueue` (serial, high QoS) | Receives `CMSampleBuffer`, hands it to the encoder |
-| `H264Encoder` | VT callback thread → `sendQueue` | Encodes, packetizes, enqueues frames |
-| `Session` | actor | Protocol state machine, owns the `NWConnection`, heartbeat timer |
+| `H264Encoder` | VT callback thread → session queue | Encodes, packetizes, enqueues frames |
+| `Session` / `Server` | serial session `DispatchQueue` | Protocol state machine, connection, heartbeat timer and bytes-in-flight accounting |
 
 **Session state machine (device):**
 
@@ -59,8 +59,17 @@ Idle ──connection──▶ Handshaking ──Hello ok──▶ Ready ──S
 On `SetFormat` or `SetCamera` while streaming: reconfigure capture (`beginConfiguration`/
 `commitConfiguration`), rebuild the encoder if the size changed, send `VideoConfig`, force an IDR.
 
-**Backpressure:** `sendQueue` tracks the bytes in flight on the `NWConnection` (send completions). Above
+**Backpressure:** `Server` tracks the bytes in flight on the `NWConnection` (send completions). Above
 the 250 ms budget it sets `dropUntilKeyframe`, skips frames, and forces an IDR.
+
+The server listens on `127.0.0.1:5321`, reachable from Windows through usbmuxd. A new connection
+replaces the previous client. When returning to the foreground without a connection, the app
+recreates the listener; it also retries listener failures. The camera preview can run while the
+phone app is open without encoding or transmitting to the PC.
+
+The encoder uses low-latency rate control up to 1440p. At 4K it uses the normal real-time path,
+no B-frames and at most one frame of delay, to address the measured 4K60 throughput cap. Device
+validation of that change remains pending in [perf.md](perf.md).
 
 ## Windows agent internals
 
@@ -70,6 +79,8 @@ the 250 ms budget it sets `dropUntilKeyframe`, skips frames, and forces an IDR.
 |---|---|
 | UI thread | Message loop, tray icon and menu (`agent/tray.cpp`). Refreshed by `PostMessage` from the engine |
 | Engine thread | `agent/engine.cpp`: device discovery, the protocol session, H.264 decode, scaling and the shm writer, all in one loop that polls the socket every 20 ms |
+| Status accept thread | Loopback HTTP requests and SSE subscriptions (`agent/status_server.cpp`) |
+| Status keepalive thread | Sends SSE keepalive comments every 15 seconds |
 
 v0.1 decodes on the session thread: the hardware decoder returns in a few milliseconds and TCP buffers
 absorb short stalls, so a separate decode thread wasn't needed yet (revisit if 4K60 profiling says so).
@@ -91,8 +102,34 @@ any state ── socket error / 3 s silence ──▶ reconnect
 Streaming ── Error(CAMERA_UNAVAILABLE) ──▶ PausedOnPhone (until the next VideoConfig)
 ```
 
-The tray icon has 4 states: grey (no device), amber (app not open, paused, or Apple Devices missing),
-green (connected), green with a white dot (streaming).
+The tray icon has 4 badges: grey (no device), amber (app not open, paused, or Apple Devices missing),
+green (connected), red (streaming).
+
+`agent/preview.cpp` renders the Windows preview and controls with Direct2D. Opening it counts as
+consumer demand: it requests 1080p30 when the virtual camera has no active consumer. Otherwise the
+virtual camera's requested format takes priority. The engine keeps a reduced preview copy (at most
+1280×720); closing the window hides it and removes preview demand. The tray keeps running.
+
+The Quality menu overrides the **source capture** request before `ChooseDeviceFormat` chooses a
+supported format. It does not change the virtual camera's negotiated output; the scaler still fits
+the source into that output. Presets are Auto, 1080p30/60 and 4K30/60. The phone announces its saved
+preference before Caps with `SetQuality`; live changes from either UI trigger format negotiation.
+The phone's preference wins reconnect unless Windows has an unsent local change (`QualityPending`).
+Windows sends Stop before changing lens/options/format, then Start. iOS capture generations prevent
+an obsolete asynchronous configuration completion from re-enabling encoding after Stop or a newer
+request. `VideoConfig` updates the agent's actual source size, including thermal/rotation changes.
+
+Lens, mirror, rotation and offline-card preference are saved as strings under
+`HKCU\Software\Tethercam` (`Camera`, `Mirror`, `Rotation`, `StatusCard`). Lens selection is persisted
+by label, including phone-side changes reported through `Status.camera_id`.
+
+`Quality` stores the preset number; `QualityPending` marks an unsent desktop choice. The phone saves
+`captureQuality` in UserDefaults. Unsupported presets are disabled in each lens's menu. A remembered
+preset can remain selected after a lens change; `ChooseDeviceFormat` clamps to its available formats.
+
+The agent exposes a read-only HTTP/SSE snapshot on `127.0.0.1:4790`, also in console mode. Engine
+notifications broadcast changed JSON to subscribers. See [STATUS_API.md](STATUS_API.md) for the
+stable contract and timing limits; the service does not carry video or control commands.
 
 **Decoder pipeline (`media/src/media.cpp`):**
 
@@ -131,7 +168,7 @@ struct Header {                  // offset 0, 4096 bytes reserved
     uint32_t agent_pid;
     uint32_t latest_slot;        // newest complete frame, 0xFFFFFFFF = none
     uint32_t agent_status;       // AgentStatus enum, drives the placeholder text
-    uint32_t reserved1;
+    uint32_t placeholder_mode;   // 0 = black (default), 1 = text status card
 
     char vcam_message[256];      // vcam's last status line; the agent copies it into its log
 };
@@ -151,7 +188,7 @@ struct SlotHeader {              // start of each slot, 64 bytes
 `std::atomic_ref`. A unit test hammers this with a concurrent writer and checks no frame is ever torn.
 
 Staleness: if `agent_heartbeat_ms` is older than 1.5 s, or no new frame number arrived for 750 ms, the vcam
-shows the placeholder for `agent_status`.
+shows black by default, or the placeholder for `agent_status` when `placeholder_mode` is 1.
 
 **Namespace:** objects are named `Global\Tethercam.*.v1`. For development without a registered camera,
 `TETHERCAM_SHM_NAMESPACE=Local` switches both sides to the session namespace (used with
@@ -182,9 +219,9 @@ shows the placeholder for `agent_status`.
 
 | Situation | Behavior |
 |---|---|
-| usbmuxd not running | Tray grey: "Install Apple Devices or iTunes". Retry every 5 s |
+| usbmuxd not running | Tray amber: "Install Apple Devices or iTunes". Retry every 1 s |
 | Device not trusted / Connect refused | Tray amber: "Open Tethercam on your iPhone and tap Trust" |
-| Phone app backgrounded or locked | Device sends `Error(CAMERA_UNAVAILABLE)` or goes quiet; vcam shows "Paused on iPhone" |
+| Phone app backgrounded or locked | Device sends `Error(CAMERA_UNAVAILABLE)` or goes quiet; vcam shows black, or "Paused on iPhone" with the status card enabled |
 | Decode error | Drop until the next IDR, send `RequestKeyframe` |
 | Agent crash | vcam sees a stale heartbeat → placeholder. The agent restarts with Windows on next login (later: a watchdog) |
 | Unsupported requested format | Nearest device format + scaling (never refuse a media type we advertised) |
@@ -196,10 +233,11 @@ shows the placeholder for `agent_status`.
   Targets: `tcam_common` (static), `tethercam-agent`, `tethercam-vcam` (DLL + `.def` exporting
   `DllGetClassObject`, `DllCanUnloadNow`, `DllRegisterServer`, `DllUnregisterServer`), `tcprobe`,
   `fakephone`, `tcam_tests`.
-- **iOS:** XcodeGen `project.yml`, deployment target iOS 16, Swift 6. `xcodebuild test` on the simulator
+- **iOS:** XcodeGen `project.yml`, deployment target iOS 16, Swift 5 language mode. `xcodebuild test` on the simulator
   covers the protocol/packetizer tests (the camera isn't available in the simulator).
-- **CI (GitHub Actions):** `windows.yml` (windows-latest: configure, build, ctest), `ios.yml` (macos-latest:
-  xcodegen, xcodebuild build + test, unsigned).
+- **CI (GitHub Actions):** `ci.yml` calls the reusable Windows and iOS workflows. Successful main
+  builds publish a versioned MSI, sideloadable IPA and checksums, then update the AltStore source.
+  Documentation-only pushes skip builds. See [DEVELOPMENT.md](DEVELOPMENT.md) for commands and releases.
 
 ## Test strategy
 

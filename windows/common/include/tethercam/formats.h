@@ -20,6 +20,11 @@ struct MediaFormat {
 // Media types the virtual camera advertises (F4), in preference order (largest first).
 std::span<const MediaFormat> AdvertisedFormats();
 
+// Capture preference is independent of the virtual camera consumer's output format.
+MediaFormat QualityFormat(proto::Quality quality, const MediaFormat& automatic);
+const char* QualityLabel(proto::Quality quality);
+bool SupportsQuality(std::span<const proto::Format> caps, proto::Quality quality);
+
 // Picks the device format for a requested media type: exact match, else the smallest
 // format at least as large in both dimensions, else the largest available. fps is clamped
 // to the chosen format's max. Returns false if `caps` is empty.

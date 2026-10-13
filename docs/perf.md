@@ -2,6 +2,19 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-13: Soak attempt with Streamlabs (real iPhone)
+
+Release agent, Streamlabs Desktop consuming 1080p30 from "Tethercam (Windows Virtual Camera)", front
+camera, phone charging. Sampled `/status` and agent memory every 30 s.
+
+| Window | Result |
+|---|---|
+| 10:23–10:35 (12 min) | live, 29–31 fps, thermal 0 (nominal), battery 100 %, agent private memory 101.4–101.7 MB (flat) |
+| 10:35–10:38 | connected, no consumer (Streamlabs released the camera) |
+| 10:38–10:49 | iPhone gone from USB (unplugged or locked); sampler stopped at 10:49 |
+
+Not a valid 1-hour soak: rerun with the phone left in place.
+
 ## 2026-10-13: 4K60 from the iPhone (tcprobe, app 0.1.4)
 
 `tcprobe stream --size 3840x2160 --fps 60 --decode` over USB, back wide lens, phone charging.

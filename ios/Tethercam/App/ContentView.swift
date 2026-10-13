@@ -31,6 +31,7 @@ struct ContentView: View {
     private var camera: some View {
         VStack(spacing: 0) {
             topBar
+            qualityMenu
             ZStack(alignment: .bottom) {
                 CameraPreview(session: model.session.camera.session)
                     .overlay(Color.black.opacity(model.dimmed ? 1 : 0))
@@ -58,6 +59,32 @@ struct ContentView: View {
             Spacer()
         }
         .frame(height: 52)
+    }
+
+    private var qualityMenu: some View {
+        Menu {
+            Picker("Capture quality", selection: Binding(get: { model.quality }, set: { model.selectQuality($0) })) {
+                ForEach(CaptureQuality.allCases, id: \.self) { quality in
+                    Text(quality == .auto ? "Auto (match video app)" : quality.label)
+                        .tag(quality)
+                        .disabled(!quality.isSupported(by: model.current?.formats ?? []))
+                }
+            }
+            Text("Capture quality; video apps choose their output size.")
+            Text("4K uses more power and can warm your phone.")
+        } label: {
+            HStack(spacing: 6) {
+                Text("Quality")
+                Text(model.quality.label).foregroundStyle(.yellow)
+                Image(systemName: "chevron.down").font(.caption)
+            }
+            .font(.subheadline.weight(.medium))
+            .frame(minHeight: 44)
+            .padding(.horizontal, 16)
+        }
+        .foregroundStyle(.white)
+        .accessibilityLabel("Capture quality")
+        .accessibilityValue(model.quality.label)
     }
 
     private var zoomPills: some View {

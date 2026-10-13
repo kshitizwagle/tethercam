@@ -21,6 +21,7 @@ uint8_t TypeOf(const Message& msg) {
                           [](const Stop&) { return uint8_t(MsgType::Stop); },
                           [](const RequestKeyframe&) { return uint8_t(MsgType::RequestKeyframe); },
                           [](const SetOptions&) { return uint8_t(MsgType::SetOptions); },
+                          [](const SetQuality&) { return uint8_t(MsgType::SetQuality); },
                           [](const VideoConfig&) { return uint8_t(MsgType::VideoConfig); },
                           [](const VideoFrame&) { return uint8_t(MsgType::VideoFrame); },
                           [](const Heartbeat&) { return uint8_t(MsgType::Heartbeat); },
@@ -58,6 +59,7 @@ void WritePayload(ByteWriter& w, const Message& msg) {
                        w.U8(m.codecs);
                    },
                    [&](const SetCamera& m) { w.U8(m.camera_id); },
+                   [&](const SetQuality& m) { w.U8(uint8_t(m.quality)); },
                    [&](const SetFormat& m) {
                        w.U16(m.width);
                        w.U16(m.height);
@@ -163,6 +165,14 @@ std::optional<Message> DecodePayload(uint8_t type, std::span<const uint8_t> payl
     case MsgType::SetCamera:
         out = SetCamera{r.U8()};
         break;
+    case MsgType::SetQuality: {
+        const auto quality = r.U8();
+        if (r.Failed()) return std::nullopt;
+        // A preset this build doesn't know (from a newer peer) is ignored, not fatal.
+        if (quality > uint8_t(Quality::UHD60)) return Unknown{type};
+        out = SetQuality{Quality(quality)};
+        break;
+    }
     case MsgType::SetFormat: {
         SetFormat m;
         m.width = r.U16();
@@ -267,7 +277,7 @@ StreamParser::Result StreamParser::Next(Message& out) {
 const char* TypeName(const Message& msg) {
     static constexpr const char* kNames[] = {
         "Hello",       "Caps",       "SetCamera", "SetFormat", "Start", "Stop",  "RequestKeyframe",
-        "SetOptions",  "VideoConfig", "VideoFrame", "Heartbeat", "Status", "Error", "Unknown"};
+        "SetOptions", "SetQuality", "VideoConfig", "VideoFrame", "Heartbeat", "Status", "Error", "Unknown"};
     return kNames[msg.index()];
 }
 

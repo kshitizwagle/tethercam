@@ -27,6 +27,7 @@ struct Snapshot {
     bool mirror = false;
     uint16_t rotation = 0;
     bool status_card = false;  // show the status card instead of black while not live
+    proto::Quality quality = proto::Quality::Auto;
     uint32_t width = 0, height = 0, fps = 0;  // format being streamed (0 when idle)
     int thermal = -1;   // iPhone thermal state 0 nominal .. 3 critical, -1 unknown
     int battery = -1;   // iPhone battery percent, -1 unknown
@@ -38,6 +39,9 @@ public:
     struct Options {
         std::string tcp;  // "host:port": use plain TCP (fakephone) instead of usbmuxd
         bool prefer_hardware_decode = true;
+        // Isolated protocol tests and embedding: do not touch the user's registry or camera mapping.
+        bool persist_settings = true;
+        bool shared_memory = true;
     };
 
     explicit Engine(Options options) : opt_(std::move(options)) {}
@@ -51,6 +55,7 @@ public:
     void SetMirror(bool mirror);
     void SetRotation(uint16_t degrees);
     void SetStatusCard(bool on);
+    void SetQuality(proto::Quality quality);
 
     // Machine-readable status for the local status API (docs/STATUS_API.md).
     std::string StatusJson() const;
@@ -74,6 +79,8 @@ private:
     void SetStatus(shm::AgentStatus s, const std::string& detail = {});
     void RememberCameraLocked();  // persists the selected lens's label; caller holds mu_
     void Notify();
+    std::string ReadSetting(const wchar_t* name) const;
+    void WriteSetting(const wchar_t* name, const std::string& value) const;
 
     Options opt_;
     std::thread thread_;
@@ -86,6 +93,7 @@ private:
     std::string preferred_camera_;  // label of the last lens the user picked (PC or phone)
     std::atomic<bool> options_dirty_{false};
     std::atomic<bool> camera_dirty_{false};
+    std::atomic<bool> quality_dirty_{false};
 
     shm::Objects shm_;
     bool shm_open_ = false;
