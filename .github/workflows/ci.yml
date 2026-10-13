@@ -89,8 +89,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          if [ "${VERSION%%.*}" = 0 ]; then stage=--prerelease; else stage=--latest; fi
-          gh release create "v$VERSION" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $stage \
+          # Every green main build is published as the latest release.
+          gh release create "v$VERSION" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
             --title "Tethercam v$VERSION" --generate-notes \
             --notes "Windows: install the MSI (needs Windows 11 and the Apple Devices app). iPhone: add the AltStore source https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/altstore/source.json, or sideload Tethercam-unsigned.ipa with Sideloadly/AltStore (signs it with your Apple ID). See README for details."
       - name: Add the release to the AltStore source

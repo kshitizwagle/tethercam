@@ -63,6 +63,7 @@ resolution the phone can stream, with as little setup and UI as possible. It's f
 ### Windows tray menu
 
 - Status line: `Connected: <device name>, 1920×1080 @ 30 fps` / `Waiting for iPhone` / error text
+- Show preview (also: click the icon): live video window; keeps the iPhone streaming while open
 - Lens: Wide / Ultra Wide / Telephoto / Front (only the lenses the phone has)
 - Mirror preview (front camera) · Rotate
 - Preferred quality: Auto (match what the app asks for) / Max
