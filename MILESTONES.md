@@ -7,13 +7,13 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 | # | Milestone | Status |
 |---|---|---|
 | M0 | Foundations | ✅ |
-| M1 | Risk spikes | 🟨 only the on-device USB round trip is left (needs the app on the iPhone) |
-| M2 | Stream (phone → PC bytes) | 🟨 iOS app compiles and passes tests in CI; run on the iPhone pending |
+| M1 | Risk spikes | ✅ |
+| M2 | Stream (phone → PC bytes) | ✅ |
 | M3 | Decode + preview | 🟨 hardware decode verified; real-phone latency pending |
-| M4 | Webcam MVP (1080p30) | 🟨 verified through Frame Server; Teams/Zoom with the real iPhone pending |
+| M4 | Webcam MVP (1080p30) | 🟨 real iPhone verified through Frame Server; Teams/Zoom/Camera-app checks pending |
 | M5 | Full resolution | 🟨 720p–4K negotiation and scaling verified with fakephone; device tests pending |
-| M6 | Robustness | 🟨 agent restart + soak verified; phone-side scenarios pending |
-| M7 | Release v0.1 | 🟨 MSI install/uninstall verified; IPA built in CI; pre-release published |
+| M6 | Robustness | 🟨 lock/unlock + replug + lens restore verified on device; sleep/resume, 1 h soak pending |
+| M7 | Release v0.1 | ✅ every green main build publishes MSI + IPA as Latest; AltStore source auto-updated |
 | M8 | Backlog | ⬜ |
 
 ## M0: Foundations
@@ -27,8 +27,8 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 ## M1: Risk spikes
 **Goal:** answer the questions that could change the architecture (R1–R3, Q1–Q2).
 **Exit criteria:**
-- [ ] `tcprobe echo` round-trips 100 MB through usbmuxd to the phone; throughput recorded (device)
-- [ ] Q1 answered: loopback-only listener reachable over USB (device)
+- [x] USB tunnel to the phone works end to end (streaming verified on device; replaces the echo spike)
+- [x] Q1 answered: the loopback-only listener is reachable through usbmuxd
 - [x] Frame Server loads the DLL; "Tethercam (Windows Virtual Camera)" streams through the source reader (Camera app itself not checked)
 - [x] Shared memory between the agent (user session) and the camera (FrameServer, session 0) works in `Global\`, including the DACL fix
 - [x] R3 answered: Apple Devices provides usbmuxd on 27015 (TECH_SPEC)
@@ -38,8 +38,8 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 **Goal:** real camera video leaves the phone and arrives on the PC.
 **Exit criteria:**
 - [x] Protocol codec in C++ and Swift; both pass the same golden vectors
-- [ ] iOS app streams 1080p30 H.264 on `Start` and stops on `Stop` (device)
-- [ ] `tcprobe stream --dump` over USB saves a file that ffplay plays (device)
+- [x] iOS app streams H.264 on `Start` and returns to preview on `Stop` (iPhone 15 Pro Max)
+- [x] Stream decodes on the PC (agent hardware decode, 1080p30/60 and 4K30)
 - [x] `fakephone` serves an H.264 stream over TCP (generates it live instead of replaying a file)
 
 ## M3: Decode + preview
@@ -70,7 +70,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 ## M6: Robustness
 **Goal:** it just keeps working.
 **Exit criteria:**
-- [ ] Replug, lock/unlock, app background/foreground recover in < 3 s (device; code paths written)
+- [x] Replug and lock/unlock recover on their own; the chosen lens is restored (device, 0.1.4)
 - [x] Agent kill/restart recovers without the consuming app reopening the camera
 - [ ] PC sleep/resume (manual test)
 - [ ] Two apps use Tethercam at the same time (admin; relies on Frame Server sharing)

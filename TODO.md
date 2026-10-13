@@ -3,9 +3,9 @@
 Work from the top. Tick items in the same commit that finishes them. Milestone exit criteria live in
 [MILESTONES.md](MILESTONES.md).
 
-## Next up (needs the app on your iPhone)
-- [ ] Sideload `Tethercam-unsigned.ipa` (release assets) with Sideloadly/AltStore, open it, keep it in front
-- [ ] `tcprobe stream --decode --snapshot snap.bmp` over USB; answers Q1 (loopback listener reachable via usbmuxd)
+## Next up
+- [x] App installed via the AltStore source; permission prompt, preview, auto-rotation, Camera-app UI verified (0.1.4)
+- [x] Real-device streaming through the virtual camera; lens memory across replug
 - [ ] Pick "Tethercam" in the Windows Camera app, Teams, Zoom, OBS; fill `docs/compat.md`
 - [ ] Latency, 4K60, thermals, unplug/lock/background recovery; fill `docs/perf.md`
 - [x] Camera registered machine-wide; Frame Server path verified (2026-10-13)
@@ -73,6 +73,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 - [x] Release workflow with checksums (MSI + unsigned IPA); pre-release tag v0.1.0-alpha.1
 
 ## Session log
+- 2026-10-13 (3): Real iPhone 15 Pro Max verified over USB (1080p30/60, 4K30 through Frame Server). Fixed: AltStore install (ad-hoc signed IPA), permission prompt, phone preview, upside-down image (auto-rotation), lens reset on reconnect (Status.camera_id + saved choice). Added: Windows preview window with Camera-app controls (Fluent icons, eased motion), Camera-app-style iPhone UI, AltStore source, releases marked Latest.
 - 2026-10-13 (2): One `ci` workflow builds Windows + iOS; when both pass on main it tags the next vX.Y.Z (patch bump, `[minor]`/`[major]` in the commit message) and publishes MSI + IPA + checksums; docs-only pushes skip CI. Version is stamped into the binaries, MSI and IPA. Replaces the manual-tag release.yml.
 - 2026-10-13: Camera registered (elevated) and verified through Frame Server; MSI install/uninstall verified; repo published, CI green incl. Swift build + tests; CI builds a sideloadable unsigned IPA; release workflow added.
 - 2026-10-12 (2): Built the whole Windows side (common, media, vcam, agent, tools, installer) and the iOS app code. Verified the Windows pipeline end to end with fakephone: hardware decode, 720p–4K negotiation, live frames through the media source, agent restart recovery, 3-minute soak. Blocked on: iPhone only visible over Wi-Fi (not trusted over USB), no admin rights for machine-wide camera registration (UAC was declined), no Mac for the iOS build.
