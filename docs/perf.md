@@ -2,6 +2,24 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-13: Real iPhone over USB
+
+**Setup:** iPhone 15 Pro Max (`iPhone16,2`, USB-C) running Tethercam 0.1.1 (sideloaded via AltStore),
+Apple Devices 1.1540, Tethercam 0.1.2 installed from the MSI, same PC as below. Consumer:
+`vcamcheck read` (Media Foundation source reader on the registered "Tethercam (Windows Virtual Camera)",
+i.e. the Frame Server path apps use). 8 s per run, Debug vcamcheck.
+
+| Consumer format | Delivered | Sample clock | Notes |
+|---|---|---|---|
+| 1920×1080 @ 30 | 29.6 fps | 30.0 | hardware decode, ~11.4 Mbps |
+| 1920×1080 @ 60 | 59.1 fps | 60.1 | 20.4 Mbps requested |
+| 3840×2160 @ 30 | 28.4 fps | 29.8 | 40 Mbps requested |
+
+The phone reported 3840×2160 @ 60 on all four lenses (wide, ultra wide, telephoto, front). Lens switching
+from the tray worked (wide → front → telephoto) mid-stream. Bug found: the picture was upside down when
+the phone was held in the other landscape orientation; fixed by following the phone's orientation
+(RotationCoordinator on iOS 17+). Latency and thermals still to measure.
+
 ## 2026-10-12: Windows pipeline with fakephone (no iPhone yet)
 
 **Setup:** Release build, AMD Ryzen 7 7700X (16 threads), AMD Radeon RX 9070 XT, Windows 11 build 26300.

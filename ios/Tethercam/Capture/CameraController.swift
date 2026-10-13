@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import UIKit
 
 /// Owns the AVCaptureSession: lens discovery, capabilities, format selection, and frame delivery
 /// (TECH_SPEC §5). All configuration happens on `sessionQueue`; frames arrive on `videoQueue`.
@@ -12,7 +13,13 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     private var devices: [UInt8: AVCaptureDevice] = [:]
     private(set) var cameras: [CameraInfo] = []
     private var mirror = false
+    /// Extra rotation requested by the PC (tray menu), added to the automatic angle.
     private var rotation: UInt16 = 0
+    /// Angle that keeps the picture level for the way the phone is held (0 = landscape, home side right).
+    private var autoAngle: CGFloat = 0
+    private var rotationCoordinator: AnyObject?
+    private var rotationObservation: NSKeyValueObservation?
+    private var orientationObserver: NSObjectProtocol?
 
     /// Called on `videoQueue` for every captured frame.
     var onFrame: ((CMSampleBuffer) -> Void)?
@@ -23,6 +30,53 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     override init() {
         super.init()
         discover()
+        if #unavailable(iOS 17.0) { observeDeviceOrientation() }
+    }
+
+    deinit {
+        if let o = orientationObserver { NotificationCenter.default.removeObserver(o) }
+    }
+
+    // MARK: Orientation
+
+    /// iOS 17+: follow the horizon-level angle for the active camera.
+    private func trackRotation(of device: AVCaptureDevice) {
+        guard #available(iOS 17.0, *) else { return }
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+        rotationCoordinator = coordinator
+        rotationObservation = coordinator.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.initial, .new]) {
+            [weak self] c, _ in
+            let angle = c.videoRotationAngleForHorizonLevelCapture
+            self?.sessionQueue.async {
+                guard let self else { return }
+                self.autoAngle = angle
+                self.applyConnectionOptions()
+            }
+        }
+    }
+
+    /// iOS 16: map device orientation changes to a capture angle.
+    private func observeDeviceOrientation() {
+        DispatchQueue.main.async { [weak self] in
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            self?.orientationObserver = NotificationCenter.default.addObserver(
+                forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                let angle: CGFloat
+                switch UIDevice.current.orientation {
+                case .landscapeLeft: angle = 0
+                case .portrait: angle = 90
+                case .landscapeRight: angle = 180
+                case .portraitUpsideDown: angle = 270
+                default: return  // face up/down or unknown: keep the last angle
+                }
+                self?.sessionQueue.async {
+                    guard let self else { return }
+                    self.autoAngle = angle
+                    self.applyConnectionOptions()
+                }
+            }
+        }
     }
 
     // MARK: Discovery
@@ -111,6 +165,7 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             guard let newInput = try? AVCaptureDeviceInput(device: device), session.canAddInput(newInput) else { return false }
             session.addInput(newInput)
             input = newInput
+            trackRotation(of: device)
         }
         if !session.outputs.contains(output) {
             output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
@@ -146,11 +201,12 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = mirror
         }
+        let total = (Int(autoAngle.rounded()) + Int(rotation)) % 360
         if #available(iOS 17.0, *) {
-            let angle = CGFloat(rotation)
+            let angle = CGFloat(total)
             if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
         } else if connection.isVideoOrientationSupported {
-            switch rotation {
+            switch total {
             case 90: connection.videoOrientation = .portrait
             case 180: connection.videoOrientation = .landscapeLeft
             case 270: connection.videoOrientation = .portraitUpsideDown
