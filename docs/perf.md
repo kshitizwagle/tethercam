@@ -2,6 +2,22 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-13: 4K60 for 30 minutes (app 0.1.10, thermal test)
+
+`tcprobe stream --size 3840x2160 --fps 60 --decode` for 1800 s, back wide lens, iPhone 15 Pro Max on
+a stand, charging over USB. Phone status sampled every 2 s (900 samples).
+
+| Time | iOS thermal state | Delivered |
+|---|---|---|
+| 0–7.6 min | 0 nominal | ~50 fps, ~68 Mbps |
+| 7.6–18.3 min | 1 fair | ~50 fps, ~68 Mbps |
+| 18.3–30 min | 2 serious | **30 fps, ~35 Mbps**: the app's thermal policy (half bitrate, ≤30 fps) engaged as designed; never reached critical |
+
+75,666 frames, 12.3 GB, hardware decode, **0 decode errors**, no disconnects. The 0.1.9 encoder change
+raised 4K60 from ~42 to ~50 fps; full 60 fps at 4K isn't reached on this phone. **Conclusion:**
+sustained 4K60 isn't viable on this phone (it throttles to 30 fps after ~18 min);
+recommend 4K30 or 1080p60 for long streams.
+
 ## 2026-10-13: Soak attempt with Streamlabs (real iPhone)
 
 Release agent, Streamlabs Desktop consuming 1080p30 from "Tethercam (Windows Virtual Camera)", front
