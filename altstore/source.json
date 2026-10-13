@@ -25,6 +25,15 @@
       },
       "versions": [
         {
+          "version": "0.1.10",
+          "buildVersion": "12",
+          "date": "2026-10-13T06:51:56Z",
+          "localizedDescription": "Tethercam v0.1.10",
+          "downloadURL": "https://github.com/kshitizwagle/tethercam/releases/download/v0.1.10/Tethercam-unsigned.ipa",
+          "size": 235256,
+          "minOSVersion": "16.0"
+        },
+        {
           "version": "0.1.9",
           "buildVersion": "11",
           "date": "2026-10-13T04:44:38Z",
