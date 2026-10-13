@@ -69,6 +69,7 @@ void Engine::Start(std::function<void()> on_change) {
         preferred_camera_ = ReadSetting(L"Camera");
         snap_.mirror = ReadSetting(L"Mirror") == "1";
         snap_.rotation = static_cast<uint16_t>(std::atoi(ReadSetting(L"Rotation").c_str()) % 360);
+        snap_.status_card = ReadSetting(L"StatusCard") == "1";
     }
     thread_ = std::thread([this] { Run(); });
 }
@@ -123,6 +124,56 @@ void Engine::SetRotation(uint16_t degrees) {
     Notify();
 }
 
+void Engine::SetStatusCard(bool on) {
+    {
+        std::lock_guard lock(mu_);
+        snap_.status_card = on;
+    }
+    WriteSetting(L"StatusCard", on ? "1" : "0");
+    Notify();
+}
+
+namespace {
+std::string JsonEscape(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '"' || c == '\\') out += '\\', out += c;
+        else if (static_cast<unsigned char>(c) < 0x20) out += std::format("\\u{:04x}", int(c));
+        else out += c;
+    }
+    return out;
+}
+
+const char* StateName(shm::AgentStatus s) {
+    switch (s) {
+    case shm::AgentStatus::Streaming: return "live";
+    case shm::AgentStatus::Connected: return "connected";
+    case shm::AgentStatus::NoDevice: return "no_iphone";
+    case shm::AgentStatus::AppNotOpen: return "app_not_open";
+    case shm::AgentStatus::PausedOnPhone: return "paused";
+    case shm::AgentStatus::NoUsbmuxd: return "no_apple_driver";
+    default: return "starting";
+    }
+}
+}  // namespace
+
+std::string Engine::StatusJson() const {
+    std::lock_guard lock(mu_);
+    std::string camera, lens;
+    for (const auto& c : snap_.cameras) {
+        if (c.camera_id != snap_.selected_camera) continue;
+        camera = c.label;
+        lens = c.position == proto::Position::Front ? "front" : c.lens == proto::Lens::UltraWide ? "ultra_wide"
+               : c.lens == proto::Lens::Telephoto ? "telephoto" : "wide";
+    }
+    const bool live = snap_.status == shm::AgentStatus::Streaming && snap_.fps > 0;
+    return std::format(
+        R"({{"state":"{}","live":{},"device":"{}","camera":"{}","lens":"{}","width":{},"height":{},"fps":{},"mirror":{},"rotation":{},"detail":"{}","version":"{}"}})",
+        StateName(snap_.status), live ? "true" : "false", JsonEscape(snap_.device_name), JsonEscape(camera), lens,
+        snap_.width, snap_.height, snap_.fps, snap_.mirror ? "true" : "false", snap_.rotation,
+        JsonEscape(snap_.detail), Version());
+}
+
 bool Engine::CopyPreview(image::Nv12Frame& out, uint64_t& seq) const {
     std::lock_guard lock(preview_mu_);
     if (preview_seq_ == seq || preview_.width == 0) return false;
@@ -166,7 +217,9 @@ Engine::Consumer Engine::TickShm() {
     if (!shm_open_) return c;
     auto* h = static_cast<shm::Header*>(shm_.view);
     shm::Atomic(h->agent_pid).store(GetCurrentProcessId(), std::memory_order_relaxed);
-    shm::Atomic(h->agent_status).store(static_cast<uint32_t>(Get().status), std::memory_order_relaxed);
+    const Snapshot snap = Get();
+    shm::Atomic(h->agent_status).store(static_cast<uint32_t>(snap.status), std::memory_order_relaxed);
+    shm::Atomic(h->placeholder_mode).store(snap.status_card ? 1u : 0u, std::memory_order_relaxed);
     shm::Atomic(h->agent_heartbeat_ms).store(now, std::memory_order_release);
     c.active = shm::Atomic(h->consumer_active).load(std::memory_order_acquire) != 0;
     c.format = {h->req_width, h->req_height, h->req_fps};
@@ -486,6 +539,13 @@ void Engine::RunSession(net::Socket& sock) {
                 detail = std::format("{}x{} @ {} fps, {:.1f} Mbps{}", device_format.width, device_format.height,
                                      static_cast<int>(window_frames / dt + 0.5), window_bytes * 8 / dt / 1e6,
                                      decoder_ready && !decoder.IsHardware() ? " (software decode)" : "");
+            }
+            {
+                std::lock_guard lock(mu_);
+                const bool live = st == shm::AgentStatus::Streaming && window_frames > 0;
+                snap_.width = live ? device_format.width : 0;
+                snap_.height = live ? device_format.height : 0;
+                snap_.fps = live ? static_cast<uint32_t>(window_frames / dt + 0.5) : 0;
             }
             SetStatus(st, detail);
             window_start = now;

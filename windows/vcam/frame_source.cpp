@@ -119,6 +119,7 @@ bool FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pi
     std::lock_guard lock(mu_);
     if (width_ == 0) return false;
     shm::AgentStatus status = shm::AgentStatus::None;
+    bool status_card = false;  // default: plain black while not live, so stream layouts show through cleanly
     if (EnsureShm()) {
         auto* h = static_cast<shm::Header*>(shm_.view);
         const uint64_t now = GetTickCount64();
@@ -126,6 +127,7 @@ bool FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pi
         const bool agent_alive = beat != 0 && now >= beat && now - beat < kAgentTimeoutMs;
         if (agent_alive) {
             status = static_cast<shm::AgentStatus>(shm::Atomic(h->agent_status).load(std::memory_order_acquire));
+            status_card = shm::Atomic(h->placeholder_mode).load(std::memory_order_relaxed) == 1;
             shm::FrameInfo info;
             if (shm::ReadLatest(shm_.view, width_, height_, live_.data.data(), width_, info)) {
                 if (info.frame_number != last_frame_number_) {
@@ -139,7 +141,12 @@ bool FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pi
             }
         }
     }
-    CopyPlanes(Placeholder(status), y, y_pitch, uv, uv_pitch);
+    if (status_card) {
+        CopyPlanes(Placeholder(status), y, y_pitch, uv, uv_pitch);
+    } else {
+        for (uint32_t r = 0; r < height_; ++r) std::memset(y + size_t(r) * y_pitch, 16, width_);
+        for (uint32_t r = 0; r < height_ / 2; ++r) std::memset(uv + size_t(r) * uv_pitch, 128, width_);
+    }
     return false;
 }
 

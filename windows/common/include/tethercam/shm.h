@@ -66,7 +66,7 @@ struct Header {
     uint32_t agent_pid;
     uint32_t latest_slot;
     uint32_t agent_status;
-    uint32_t reserved1;
+    uint32_t placeholder_mode;  // what the camera shows while not live: 0 = black, 1 = status card
 
     // Written by the vcam: last status line, for the agent's log (the vcam cannot write files).
     char vcam_message[256];

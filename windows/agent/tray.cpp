@@ -18,6 +18,7 @@ constexpr UINT kTrayId = 1;
 enum MenuId : UINT {
     kQuit = 100,
     kPreview,
+    kStatusCard,
     kOpenLogs,
     kMirror,
     kRotate0,
@@ -200,6 +201,8 @@ void Tray::ShowMenu() {
         AppendMenuW(rotate, MF_STRING | (s.rotation == deg ? MF_CHECKED : 0), id, std::format(L"{}°", deg).c_str());
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(rotate), L"Rotate");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | (s.status_card ? MF_CHECKED : 0), kStatusCard,
+                L"Show status card while the camera is offline");
     AppendMenuW(menu, MF_STRING, kOpenLogs, L"Open log folder");
     const std::wstring about = L"Tethercam " + Widen(std::string(Version())) + L" (GPL-3.0)";
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, about.c_str());
@@ -212,6 +215,7 @@ void Tray::ShowMenu() {
     DestroyMenu(menu);
     if (cmd == kQuit) PostQuitMessage(0);
     else if (cmd == kPreview) ShowPreview();
+    else if (cmd == kStatusCard) engine_.SetStatusCard(!s.status_card);
     else if (cmd == kOpenLogs) ShellExecuteW(nullptr, L"open", log_dir_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     else if (cmd == kMirror) engine_.SetMirror(!s.mirror);
     else if (cmd >= kRotate0 && cmd <= kRotate270) engine_.SetRotation(uint16_t((cmd - kRotate0) * 90));

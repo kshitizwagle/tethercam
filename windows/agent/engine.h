@@ -26,6 +26,8 @@ struct Snapshot {
     int selected_camera = -1;
     bool mirror = false;
     uint16_t rotation = 0;
+    bool status_card = false;  // show the status card instead of black while not live
+    uint32_t width = 0, height = 0, fps = 0;  // format being streamed (0 when idle)
 };
 
 class Engine {
@@ -45,6 +47,10 @@ public:
     void SelectCamera(int camera_id);
     void SetMirror(bool mirror);
     void SetRotation(uint16_t degrees);
+    void SetStatusCard(bool on);
+
+    // Machine-readable status for the local status API (docs/STATUS_API.md).
+    std::string StatusJson() const;
 
     // The preview window counts as a consumer: while it's open the phone streams even if no app
     // has the virtual camera open.

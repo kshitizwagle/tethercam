@@ -21,6 +21,7 @@
 
 #include "engine.h"
 #include "install.h"
+#include "status_server.h"
 #include "tethercam/log.h"
 #include "tethercam/media.h"
 #include "tethercam/version.h"
@@ -111,20 +112,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
 
     agent::Engine engine(options);
+    agent::StatusServer status([&engine] { return engine.StatusJson(); });
+    status.Start();
     int result = 0;
     if (console) {
-        engine.Start({});
+        engine.Start([&status] { status.Broadcast(); });
         std::printf("Tethercam agent %.*s running. Press Ctrl+C to quit.\n", int(Version().size()), Version().data());
         static HANDLE quit = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         SetConsoleCtrlHandler([](DWORD) -> BOOL { return SetEvent(quit); }, TRUE);
         WaitForSingleObject(quit, INFINITE);
     } else {
         agent::Tray tray(instance, engine, log_dir);
-        engine.Start([&tray] { tray.PostRefresh(); });
+        engine.Start([&tray, &status] {
+            tray.PostRefresh();
+            status.Broadcast();
+        });
         if (preview) tray.ShowPreview();
         result = tray.Run();
     }
     engine.StopThread();
+    status.Stop();
     session.reset();
     if (single) CloseHandle(single);
     return result;
