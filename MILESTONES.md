@@ -6,14 +6,14 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 
 | # | Milestone | Status |
 |---|---|---|
-| M0 | Foundations | 🟨 iOS skeleton build + CI run pending |
-| M1 | Risk spikes | 🟨 Windows side done; USB echo + Frame Server load pending (device, admin) |
-| M2 | Stream (phone → PC bytes) | 🟨 Windows side + iOS code written; iOS build/run pending (Mac, device) |
+| M0 | Foundations | ✅ |
+| M1 | Risk spikes | 🟨 only the on-device USB round trip is left (needs the app on the iPhone) |
+| M2 | Stream (phone → PC bytes) | 🟨 iOS app compiles and passes tests in CI; run on the iPhone pending |
 | M3 | Decode + preview | 🟨 hardware decode verified; real-phone latency pending |
-| M4 | Webcam MVP (1080p30) | 🟨 pipeline verified in-process; real apps pending (admin, device) |
+| M4 | Webcam MVP (1080p30) | 🟨 verified through Frame Server; Teams/Zoom with the real iPhone pending |
 | M5 | Full resolution | 🟨 720p–4K negotiation and scaling verified with fakephone; device tests pending |
 | M6 | Robustness | 🟨 agent restart + soak verified; phone-side scenarios pending |
-| M7 | Release v0.1 | 🟨 MSI builds; install test + release pending |
+| M7 | Release v0.1 | 🟨 MSI install/uninstall verified; IPA built in CI; pre-release published |
 | M8 | Backlog | ⬜ |
 
 ## M0: Foundations
@@ -21,23 +21,23 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 **Exit criteria:**
 - [x] Product, tech spec, design, protocol and plan docs written
 - [x] `windows/` CMake project builds `tcam_common`, `tethercam-agent`, `tethercam-vcam`, tests
-- [ ] `ios/` XcodeGen project builds the app and test target (written; verify on the Mac)
-- [ ] CI builds both on every push (workflows written; needs a GitHub remote)
+- [x] `ios/` XcodeGen project builds the app and test target (macOS CI, 5 Swift tests pass)
+- [x] CI builds both on every push (github.com/kshitizwagle/tethercam)
 
 ## M1: Risk spikes
 **Goal:** answer the questions that could change the architecture (R1–R3, Q1–Q2).
 **Exit criteria:**
 - [ ] `tcprobe echo` round-trips 100 MB through usbmuxd to the phone; throughput recorded (device)
 - [ ] Q1 answered: loopback-only listener reachable over USB (device)
-- [ ] "Tethercam" appears in the Windows Camera app (admin)
-- [x] Shared memory between agent and camera works, including the DACL fix (session namespace; Global namespace to confirm with admin install)
+- [x] Frame Server loads the DLL; "Tethercam (Windows Virtual Camera)" streams through the source reader (Camera app itself not checked)
+- [x] Shared memory between the agent (user session) and the camera (FrameServer, session 0) works in `Global\`, including the DACL fix
 - [x] R3 answered: Apple Devices provides usbmuxd on 27015 (TECH_SPEC)
 - [x] Q2 partly answered: per-user registration fails, machine-wide required (TECH_SPEC)
 
 ## M2: Stream
 **Goal:** real camera video leaves the phone and arrives on the PC.
 **Exit criteria:**
-- [x] Protocol codec in C++ and Swift; C++ passes the golden vectors (Swift tests written, run on the Mac)
+- [x] Protocol codec in C++ and Swift; both pass the same golden vectors
 - [ ] iOS app streams 1080p30 H.264 on `Start` and stops on `Stop` (device)
 - [ ] `tcprobe stream --dump` over USB saves a file that ffplay plays (device)
 - [x] `fakephone` serves an H.264 stream over TCP (generates it live instead of replaying a file)
@@ -81,10 +81,10 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 **Goal:** a non-developer can install it.
 **Exit criteria:**
 - [x] MSI builds (WiX 5): Program Files install, COM + virtual camera registration, agent at login, uninstall cleanup
-- [ ] MSI install/uninstall tested on a clean machine (admin)
-- [ ] iOS app installable from source (and TestFlight if Q5 is resolved) (Mac)
+- [x] MSI install / uninstall / reinstall verified (files, HKLM COM key, Run key, camera present/absent)
+- [x] iOS app: unsigned sideloadable IPA built by CI (Sideloadly/AltStore)
 - [x] User guide + troubleshooting in README
-- [ ] Tagged GitHub release with checksums (needs the GitHub repo)
+- [x] Release workflow publishes MSI + IPA + SHA256SUMS on `v*` tags (pre-release)
 
 ## M8: Backlog
 Audio (virtual microphone), HEVC, Windows 10 DirectShow fallback, focus/exposure, GPU scaling and shared

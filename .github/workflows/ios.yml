@@ -3,6 +3,7 @@ name: ios
 on:
   push:
   pull_request:
+  workflow_call:
 
 jobs:
   build:
@@ -14,14 +15,23 @@ jobs:
       - name: Generate project
         working-directory: ios
         run: xcodegen
-      - name: Build (unsigned)
-        working-directory: ios
-        run: >
-          xcodebuild -project Tethercam.xcodeproj -scheme Tethercam
-          -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
       - name: Test (simulator)
         working-directory: ios
         run: >
           xcodebuild -project Tethercam.xcodeproj -scheme Tethercam
           -destination "platform=iOS Simulator,name=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone [^(]+' | sed 's/ *$//')"
           CODE_SIGNING_ALLOWED=NO test
+      - name: Build unsigned IPA for sideloading
+        working-directory: ios
+        run: |
+          xcodebuild -project Tethercam.xcodeproj -scheme Tethercam -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          rm -rf Payload && mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Tethercam.app Payload/
+          zip -qry Tethercam-unsigned.ipa Payload
+          ls -l Tethercam-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tethercam-ios
+          path: ios/Tethercam-unsigned.ipa

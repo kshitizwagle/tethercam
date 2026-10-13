@@ -14,7 +14,13 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Tethercam is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Launch Condition="Installed OR VersionNT64 AND WindowsBuild &gt;= 22000"
+    <!-- msiexec reports Windows 8.1 compatibility values for VersionNT/WindowsBuild, so read the
+         real build number from the registry. String comparison is fine for 5-digit builds. -->
+    <Property Id="WINBUILD">
+      <RegistrySearch Id="CurrentBuild" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                      Name="CurrentBuild" Type="raw" Bitness="always64" />
+    </Property>
+    <Launch Condition="Installed OR (VersionNT64 AND WINBUILD &gt;= &quot;22000&quot;)"
             Message="Tethercam needs 64-bit Windows 11 (build 22000 or later)." />
 
     <StandardDirectory Id="ProgramFiles64Folder">
