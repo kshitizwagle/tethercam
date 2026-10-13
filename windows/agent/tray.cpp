@@ -35,9 +35,10 @@ std::wstring Widen(const std::string& s) {
     return w;
 }
 
-// A filled circle in the given colour; no icon resources needed.
-HICON MakeDotIcon(COLORREF color, bool ring) {
+// The app icon with a small status badge in the bottom-right corner (grey / amber / green / red).
+HICON MakeBadgedIcon(HINSTANCE instance, COLORREF badge) {
     const int size = GetSystemMetrics(SM_CXSMICON);
+    HICON app = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, size, size, LR_DEFAULTCOLOR));
     BITMAPV5HEADER bi{};
     bi.bV5Size = sizeof(bi);
     bi.bV5Width = size;
@@ -50,21 +51,41 @@ HICON MakeDotIcon(COLORREF color, bool ring) {
     bi.bV5BlueMask = 0x000000FF;
     bi.bV5AlphaMask = 0xFF000000;
     void* bits = nullptr;
-    HDC dc = GetDC(nullptr);
-    HBITMAP color_bmp = CreateDIBSection(dc, reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS, &bits, nullptr, 0);
-    ReleaseDC(nullptr, dc);
+    HDC screen = GetDC(nullptr);
+    HBITMAP color_bmp = CreateDIBSection(screen, reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS, &bits, nullptr, 0);
+    HDC mem = CreateCompatibleDC(screen);
+    ReleaseDC(nullptr, screen);
+    HGDIOBJ old = SelectObject(mem, color_bmp);
     auto* px = static_cast<uint32_t*>(bits);
-    const float c = (size - 1) / 2.0f, r = size * 0.42f;
+    std::fill(px, px + size * size, 0u);
+    if (app) DrawIconEx(mem, 0, 0, app, size, size, 0, nullptr, DI_NORMAL);
+    SelectObject(mem, old);
+    DeleteDC(mem);
+    if (app) DestroyIcon(app);
+
+    // Badge: filled circle with a dark outline so it reads on light and dark taskbars.
+    const float r = size * 0.30f, c = size - r - 0.5f, ring = std::max(1.0f, size / 16.0f);
+    const uint32_t rgb = (GetRValue(badge) << 16) | (GetGValue(badge) << 8) | GetBValue(badge);
     for (int y = 0; y < size; ++y) {
         for (int x = 0; x < size; ++x) {
             const float d = std::hypot(x - c, y - c);
-            float a = std::clamp(r + 0.5f - d, 0.0f, 1.0f);
-            uint32_t rgb = (GetRValue(color) << 16) | (GetGValue(color) << 8) | GetBValue(color);
-            if (ring && d < r * 0.45f) rgb = 0xFFFFFF;  // white center dot = streaming
-            const uint32_t alpha = uint32_t(a * 255);
-            const uint32_t pr = ((rgb >> 16) & 0xFF) * alpha / 255, pg = ((rgb >> 8) & 0xFF) * alpha / 255,
-                           pb = (rgb & 0xFF) * alpha / 255;
-            px[y * size + x] = (alpha << 24) | (pr << 16) | (pg << 8) | pb;
+            const float outer = std::clamp(r + ring + 0.5f - d, 0.0f, 1.0f);
+            if (outer <= 0) continue;
+            const float inner = std::clamp(r + 0.5f - d, 0.0f, 1.0f);
+            // Composite: dark ring under the coloured dot, over the icon pixel.
+            uint32_t& p = px[y * size + x];
+            auto blend = [&](uint32_t col, float a) {
+                const uint32_t dst = p;
+                const float da = ((dst >> 24) & 0xFF) / 255.0f;
+                const float oa = a + da * (1 - a);
+                auto ch = [&](int shift) {
+                    const float sc = ((col >> shift) & 0xFF) / 255.0f, dc = ((dst >> shift) & 0xFF) / 255.0f;  // dst premultiplied
+                    return uint32_t(std::clamp((sc * a + dc * (1 - a)) * 255.0f + 0.5f, 0.0f, 255.0f));
+                };
+                p = (uint32_t(oa * 255 + 0.5f) << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0);
+            };
+            blend(0x1C1C1E, outer);
+            blend(rgb, inner);
         }
     }
     HBITMAP mask = CreateBitmap(size, size, 1, 1, nullptr);
@@ -91,10 +112,10 @@ const wchar_t* StatusText(shm::AgentStatus s) {
 
 Tray::Tray(HINSTANCE instance, Engine& engine, std::wstring log_dir)
     : instance_(instance), engine_(engine), log_dir_(std::move(log_dir)) {
-    icons_[0] = MakeDotIcon(RGB(140, 140, 150), false);  // no device
-    icons_[1] = MakeDotIcon(RGB(235, 160, 40), false);   // app not open / paused
-    icons_[2] = MakeDotIcon(RGB(40, 170, 90), false);    // connected
-    icons_[3] = MakeDotIcon(RGB(40, 170, 90), true);     // streaming
+    icons_[0] = MakeBadgedIcon(instance, RGB(142, 142, 147));  // no device
+    icons_[1] = MakeBadgedIcon(instance, RGB(255, 159, 10));   // app not open / paused
+    icons_[2] = MakeBadgedIcon(instance, RGB(48, 209, 88));    // connected
+    icons_[3] = MakeBadgedIcon(instance, RGB(255, 59, 48));    // live (like the LIVE chip)
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = WndProc;
     wc.hInstance = instance;

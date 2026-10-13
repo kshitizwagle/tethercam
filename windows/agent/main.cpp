@@ -60,6 +60,8 @@ void AttachConsoleIfAny(bool create) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    // Crisp UI on high-DPI displays (the preview draws in DIPs with Direct2D).
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     bool console = false, preview = false, install = false, uninstall = false, per_user = false, session_camera = false;

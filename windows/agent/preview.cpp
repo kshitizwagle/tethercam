@@ -12,18 +12,24 @@ namespace {
 
 constexpr UINT_PTR kTimerId = 1;
 constexpr uint64_t kStaleMs = 1000;
-constexpr int kBarHeight = 72;
-constexpr COLORREF kYellow = RGB(255, 214, 10);  // iOS Camera accent
-// Segoe Fluent Icons (Windows 11): switch camera, rotate, mirror.
-constexpr wchar_t kIconFlip[] = L"\uE89E";
-constexpr wchar_t kIconRotate[] = L"\uE8B4";
-constexpr wchar_t kIconMirror[] = L"\uE8AB";
-// Ease-out time constant: ~3 tau (180 ms) to settle, short enough to feel immediate.
-constexpr float kTauMs = 60.0f;
+constexpr uint64_t kIdleHideMs = 2500;  // controls fade out after this long without mouse movement
+constexpr float kTauMs = 60.0f;         // ease-out time constant: ~180 ms to settle
 
-COLORREF Mix(COLORREF a, COLORREF b, float t) {
-    auto ch = [t](int x, int y) { return int(x + (y - x) * t + 0.5f); };
-    return RGB(ch(GetRValue(a), GetRValue(b)), ch(GetGValue(a), GetGValue(b)), ch(GetBValue(a), GetBValue(b)));
+// Segoe Fluent Icons (Windows 11).
+constexpr wchar_t kIconFlip[] = L"";
+constexpr wchar_t kIconRotate[] = L"";
+constexpr wchar_t kIconMirror[] = L"";
+constexpr wchar_t kIconCamera[] = L"";
+
+constexpr uint32_t kYellow = 0xFFD60A;  // iOS Camera accent
+constexpr uint32_t kRed = 0xFF3B30;
+
+D2D1_COLOR_F Rgba(uint32_t rgb, float a = 1.0f) {
+    return D2D1::ColorF(((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f, (rgb & 0xFF) / 255.0f, a);
+}
+
+D2D1_COLOR_F Mix(D2D1_COLOR_F a, D2D1_COLOR_F b, float t) {
+    return D2D1::ColorF(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
 }
 
 std::wstring Widen(const std::string& s) {
@@ -36,42 +42,48 @@ std::wstring Widen(const std::string& s) {
 
 const wchar_t* Hint(shm::AgentStatus s) {
     switch (s) {
-    case shm::AgentStatus::NoUsbmuxd: return L"Install Apple Devices from the Microsoft Store.";
-    case shm::AgentStatus::NoDevice: return L"Connect your iPhone with a USB cable.";
-    case shm::AgentStatus::AppNotOpen: return L"Open Tethercam on your iPhone (unlock it and tap Trust if asked).";
-    case shm::AgentStatus::PausedOnPhone: return L"Paused on iPhone: bring the Tethercam app to the front.";
+    case shm::AgentStatus::NoUsbmuxd: return L"Install Apple Devices from the Microsoft Store";
+    case shm::AgentStatus::NoDevice: return L"Connect your iPhone with a USB cable";
+    case shm::AgentStatus::AppNotOpen: return L"Open Tethercam on your iPhone";
+    case shm::AgentStatus::PausedOnPhone: return L"Paused — bring Tethercam to the front on your iPhone";
     default: return L"Starting the iPhone camera…";
     }
 }
 
-// Zoom-style name for a lens, like the iOS Camera app: "0.5×", "1×", "5×".
+// Camera-app zoom name: ".5×", "1×", "5×" (the phone appends the factor to the label).
 std::wstring LensText(const proto::Camera& c) {
     const std::wstring label = Widen(c.label);
     const auto space = label.find_last_of(L' ');
-    const std::wstring last = space == std::wstring::npos ? label : label.substr(space + 1);
-    if (!last.empty() && last.back() == L'×') return last;  // the phone sent a zoom factor
-    switch (c.lens) {
-    case proto::Lens::UltraWide: return L"0.5×";
-    case proto::Lens::Wide: return L"1×";
-    case proto::Lens::Telephoto: return L"Tele";
-    default: return L"1×";
-    }
+    std::wstring last = space == std::wstring::npos ? label : label.substr(space + 1);
+    if (last.empty() || last.back() != L'×')
+        last = c.lens == proto::Lens::UltraWide ? L"0.5×" : c.lens == proto::Lens::Telephoto ? L"2×" : L"1×";
+    if (last.rfind(L"0.", 0) == 0) last = last.substr(1);
+    return last;
 }
 
-HFONT MakeFont(int px, int weight, const wchar_t* face = L"Segoe UI") {
-    return CreateFontW(-px, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                       CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, face);
+wil::com_ptr<IDWriteTextFormat> MakeFormat(IDWriteFactory* f, const wchar_t* family, float size, DWRITE_FONT_WEIGHT w) {
+    wil::com_ptr<IDWriteTextFormat> fmt;
+    if (FAILED(f->CreateTextFormat(family, nullptr, w, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size,
+                                   L"en-us", fmt.put())))
+        f->CreateTextFormat(L"Segoe UI", nullptr, w, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size,
+                            L"en-us", fmt.put());
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    return fmt;
 }
 
 }  // namespace
 
 PreviewWindow::PreviewWindow(HINSTANCE instance, Engine& engine) : instance_(instance), engine_(engine) {
+    D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2d_.put());
+    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                        reinterpret_cast<IUnknown**>(dwrite_.put()));
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = WndProc;
     wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = nullptr;  // we paint everything
-    wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     wc.lpszClassName = L"TethercamPreview";
     RegisterClassExW(&wc);
 }
@@ -83,14 +95,21 @@ PreviewWindow::~PreviewWindow() {
 
 void PreviewWindow::Show() {
     if (!hwnd_) {
-        RECT r{0, 0, 960, 540 + kBarHeight};
-        AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-        hwnd_ = CreateWindowExW(0, L"TethercamPreview", L"Tethercam preview", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
+        const UINT dpi = GetDpiForSystem();
+        RECT r{0, 0, LONG(960 * dpi / 96), LONG(540 * dpi / 96)};
+        AdjustWindowRectExForDpi(&r, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
+        hwnd_ = CreateWindowExW(0, L"TethercamPreview", L"Tethercam", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
                                 CW_USEDEFAULT, r.right - r.left, r.bottom - r.top, nullptr, nullptr, instance_, this);
-        BOOL dark = TRUE;  // dark title bar to match the black UI
+        // Windows 11 look: dark Mica title bar and rounded corners.
+        BOOL dark = TRUE;
         DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+        int backdrop = DWMSBT_MAINWINDOW;
+        DwmSetWindowAttribute(hwnd_, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
+        int corners = DWMWCP_ROUND;
+        DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
     }
     engine_.SetPreview(true);
+    last_mouse_ms_ = GetTickCount64();
     SetTimer(hwnd_, kTimerId, 15, nullptr);
     ShowWindow(hwnd_, SW_SHOWNORMAL);
     SetForegroundWindow(hwnd_);
@@ -103,6 +122,30 @@ void PreviewWindow::Hide() {
     engine_.SetPreview(false);
 }
 
+bool PreviewWindow::CreateDeviceResources() {
+    if (target_) return true;
+    RECT rc;
+    GetClientRect(hwnd_, &rc);
+    const auto props = D2D1::RenderTargetProperties(
+        D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
+    if (FAILED(d2d_->CreateHwndRenderTarget(
+            props, D2D1::HwndRenderTargetProperties(hwnd_, D2D1::SizeU(rc.right, rc.bottom)), target_.put())))
+        return false;
+    // Draw in DIPs so the controls scale with the display's DPI.
+    const UINT dpi = GetDpiForWindow(hwnd_);
+    target_->SetDpi(float(dpi), float(dpi));
+    dpi_scale_ = dpi / 96.0f;
+    target_->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), brush_.put());
+    label_font_ = MakeFormat(dwrite_.get(), L"Segoe UI Variable Text", 13, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    small_font_ = MakeFormat(dwrite_.get(), L"Segoe UI Variable Text", 12, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    icon_font_ = MakeFormat(dwrite_.get(), L"Segoe Fluent Icons", 17, DWRITE_FONT_WEIGHT_NORMAL);
+    hint_font_ = MakeFormat(dwrite_.get(), L"Segoe UI Variable Display", 17, DWRITE_FONT_WEIGHT_NORMAL);
+    hint_icon_font_ = MakeFormat(dwrite_.get(), L"Segoe Fluent Icons", 40, DWRITE_FONT_WEIGHT_NORMAL);
+    video_.reset();
+    video_dirty_ = true;
+    return true;
+}
+
 void PreviewWindow::Tick() {
     if (engine_.CopyPreview(frame_, seq_)) {
         width_ = frame_.width;
@@ -110,19 +153,18 @@ void PreviewWindow::Tick() {
         bgra_.resize(size_t(width_) * height_ * 4);
         image::Nv12ToBgra(frame_.View(), bgra_.data(), width_ * 4);
         last_frame_ms_ = GetTickCount64();
+        video_dirty_ = true;
     } else if (last_frame_ms_ && GetTickCount64() - last_frame_ms_ > kStaleMs) {
-        last_frame_ms_ = 0;  // switch to the status text
+        last_frame_ms_ = 0;
     }
-    Animate();
-    InvalidateRect(hwnd_, nullptr, FALSE);
     const Snapshot s = engine_.Get();
-    std::wstring title = L"Tethercam preview";
+    std::wstring title = L"Tethercam";
     if (!s.device_name.empty()) title += L" — " + Widen(s.device_name);
-    if (!s.detail.empty()) title += L" — " + Widen(s.detail);
     SetWindowTextW(hwnd_, title.c_str());
+    InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void PreviewWindow::Layout(const Snapshot& s, int width, int top) {
+void PreviewWindow::Layout(const Snapshot& s, float w, float h) {
     buttons_.clear();
     const proto::Camera* current = nullptr;
     for (const auto& c : s.cameras)
@@ -130,60 +172,47 @@ void PreviewWindow::Layout(const Snapshot& s, int width, int top) {
     if (!current && !s.cameras.empty()) current = &s.cameras.front();
     if (current && current->position == proto::Position::Back) last_back_camera_ = current->camera_id;
 
-    const int cy = top + kBarHeight / 2;
-    // Centre: lens pills for the side in use (like the Camera app's zoom buttons).
+    const float cy = h - 44;
+    // Centre: lens selector for the back cameras.
     std::vector<const proto::Camera*> lenses;
-    if (current)
+    if (current && current->position == proto::Position::Back)
         for (const auto& c : s.cameras)
-            if (c.position == current->position) lenses.push_back(&c);
-    auto order = [](const proto::Camera* c) {  // 0.5x, 1x, tele
+            if (c.position == proto::Position::Back) lenses.push_back(&c);
+    auto order = [](const proto::Camera* c) {
         return c->lens == proto::Lens::UltraWide ? 0 : c->lens == proto::Lens::Wide ? 1 : 2;
     };
     std::sort(lenses.begin(), lenses.end(), [&](auto* a, auto* b) { return order(a) < order(b); });
-    const int pill = 52, gap = 8;
-    const int total = int(lenses.size()) * pill + std::max(0, int(lenses.size()) - 1) * gap;
-    int x = width / 2 - total / 2;
     if (lenses.size() > 1) {
+        const float pill = 40, gap = 4;
+        const float total = lenses.size() * pill + (lenses.size() - 1) * gap;
+        float x = w / 2 - total / 2;
         for (auto* c : lenses) {
-            buttons_.push_back({RECT{x, cy - 18, x + pill, cy + 18}, Action::Lens, c->camera_id, LensText(*c),
-                                current && c->camera_id == current->camera_id, false});
+            buttons_.push_back({D2D1::RectF(x, cy - pill / 2, x + pill, cy + pill / 2), Action::Lens, c->camera_id,
+                                LensText(*c), c == current, false});
             x += pill + gap;
         }
     }
-    // Left: mirror and rotate. Right: flip front/back.
-    const int r = 22;
-    buttons_.push_back({RECT{24, cy - r, 24 + 2 * r, cy + r}, Action::Mirror, -1, kIconMirror, s.mirror, true});
-    buttons_.push_back({RECT{24 + 2 * r + 14, cy - r, 24 + 4 * r + 14, cy + r}, Action::Rotate, -1,
-                        kIconRotate, s.rotation != 0, true});
+    // Left: mirror, rotate. Right: switch camera.
+    const float r = 22;
+    buttons_.push_back({D2D1::RectF(24, cy - r, 24 + 2 * r, cy + r), Action::Mirror, -1, kIconMirror, s.mirror, true});
+    buttons_.push_back({D2D1::RectF(24 + 2 * r + 12, cy - r, 24 + 4 * r + 12, cy + r), Action::Rotate, -1, kIconRotate,
+                        s.rotation != 0, true});
     bool has_front = false, has_back = false;
     for (const auto& c : s.cameras) (c.position == proto::Position::Front ? has_front : has_back) = true;
     if (has_front && has_back)
         buttons_.push_back(
-            {RECT{width - 24 - 2 * r, cy - r, width - 24, cy + r}, Action::Flip, -1, kIconFlip, false, true});
+            {D2D1::RectF(w - 24 - 2 * r, cy - r, w - 24, cy + r), Action::Flip, -1, kIconFlip, false, true});
 }
 
-void PreviewWindow::Animate() {
-    const uint64_t now = GetTickCount64();
-    const float dt = last_anim_ms_ ? float(std::min<uint64_t>(now - last_anim_ms_, 100)) : 16.0f;
-    last_anim_ms_ = now;
-    const float k = 1.0f - std::exp(-dt / kTauMs);
-    for (const auto& b : buttons_) {
-        Anim& a = anims_[Key(b)];
-        const bool over = PtInRect(&b.rect, mouse_) != FALSE;
-        a.hover += ((over ? 1.0f : 0.0f) - a.hover) * k;
-        a.press += ((pressed_key_ == Key(b) && over ? 1.0f : 0.0f) - a.press) * std::min(1.0f, k * 2);
-        a.active += ((b.active ? 1.0f : 0.0f) - a.active) * k;
-    }
-}
-
-const PreviewWindow::Button* PreviewWindow::HitTest(POINT pt) const {
+const PreviewWindow::Button* PreviewWindow::HitTest(float x, float y) const {
+    if (chrome_ < 0.2f) return nullptr;  // hidden controls aren't clickable
     for (const auto& b : buttons_)
-        if (PtInRect(&b.rect, pt)) return &b;
+        if (x >= b.rect.left && x <= b.rect.right && y >= b.rect.top && y <= b.rect.bottom) return &b;
     return nullptr;
 }
 
-void PreviewWindow::Click(POINT pt) {
-    const Button* b = HitTest(pt);
+void PreviewWindow::Click(float x, float y) {
+    const Button* b = HitTest(x, y);
     if (!b) return;
     const Snapshot s = engine_.Get();
     switch (b->action) {
@@ -211,90 +240,151 @@ void PreviewWindow::Click(POINT pt) {
         break;
     }
     }
-    InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void PreviewWindow::Paint() {
-    PAINTSTRUCT ps;
-    HDC dc = BeginPaint(hwnd_, &ps);
-    RECT client;
-    GetClientRect(hwnd_, &client);
-    const int cw = client.right, ch = client.bottom;
-    const int vh = std::max(0, ch - kBarHeight);
-    // Double-buffer to avoid flicker.
-    HDC mem = CreateCompatibleDC(dc);
-    HBITMAP bmp = CreateCompatibleBitmap(dc, cw, ch);
-    HGDIOBJ old = SelectObject(mem, bmp);
-    HBRUSH black = CreateSolidBrush(RGB(0, 0, 0));
-    FillRect(mem, &client, black);
-    DeleteObject(black);
-    SetBkMode(mem, TRANSPARENT);
+void PreviewWindow::Render() {
+    if (!CreateDeviceResources()) return;
+    const D2D1_SIZE_F size = target_->GetSize();
+    const float w = size.width, h = size.height;
+    const Snapshot s = engine_.Get();
+    const bool live = last_frame_ms_ != 0 && width_ && height_;
 
-    // Video.
-    if (last_frame_ms_ && width_ && height_ && vh > 0) {
-        int w = cw, h = int(int64_t(cw) * height_ / width_);
-        if (h > vh) {
-            h = vh;
-            w = int(int64_t(vh) * width_ / height_);
+    // Animation step (exponential ease-out, frame-rate independent).
+    const uint64_t now = GetTickCount64();
+    const float dt = last_anim_ms_ ? float(std::min<uint64_t>(now - last_anim_ms_, 100)) : 16.0f;
+    last_anim_ms_ = now;
+    const float k = 1.0f - std::exp(-dt / kTauMs);
+    const bool show_chrome = !live || now - last_mouse_ms_ < kIdleHideMs;
+    chrome_ += ((show_chrome ? 1.0f : 0.0f) - chrome_) * (show_chrome ? k : k * 0.5f);
+
+    Layout(s, w, h);
+    for (const auto& b : buttons_) {
+        Anim& a = anims_[Key(b)];
+        const bool over = mouse_x_ >= b.rect.left && mouse_x_ <= b.rect.right && mouse_y_ >= b.rect.top &&
+                          mouse_y_ <= b.rect.bottom;
+        a.hover += ((over ? 1.0f : 0.0f) - a.hover) * k;
+        a.press += ((pressed_key_ == Key(b) && over ? 1.0f : 0.0f) - a.press) * std::min(1.0f, 2 * k);
+        a.active += ((b.active ? 1.0f : 0.0f) - a.active) * k;
+        if (b.action == Action::Lens && b.active) {
+            const float cx = (b.rect.left + b.rect.right) / 2;
+            thumb_x_ = thumb_x_ < 0 ? cx : thumb_x_ + (cx - thumb_x_) * k;
         }
-        BITMAPINFO bi{};
-        bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
-        bi.bmiHeader.biWidth = int(width_);
-        bi.bmiHeader.biHeight = -int(height_);
-        bi.bmiHeader.biPlanes = 1;
-        bi.bmiHeader.biBitCount = 32;
-        bi.bmiHeader.biCompression = BI_RGB;
-        SetStretchBltMode(mem, HALFTONE);
-        StretchDIBits(mem, (cw - w) / 2, (vh - h) / 2, w, h, 0, 0, int(width_), int(height_), bgra_.data(), &bi,
-                      DIB_RGB_COLORS, SRCCOPY);
+    }
+
+    target_->BeginDraw();
+    target_->Clear(Rgba(0x000000));
+
+    // Video, fitted to the window.
+    if (live) {
+        if (video_dirty_) {
+            const auto bsize = video_ ? video_->GetPixelSize() : D2D1_SIZE_U{};
+            if (!video_ || bsize.width != width_ || bsize.height != height_) {
+                video_.reset();
+                target_->CreateBitmap(D2D1::SizeU(width_, height_), bgra_.data(), width_ * 4,
+                                      D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                                                                               D2D1_ALPHA_MODE_IGNORE)),
+                                      video_.put());
+            } else {
+                video_->CopyFromMemory(nullptr, bgra_.data(), width_ * 4);
+            }
+            video_dirty_ = false;
+        }
+        float vw = w, vh = w * height_ / width_;
+        if (vh > h) {
+            vh = h;
+            vw = h * width_ / height_;
+        }
+        if (video_)
+            target_->DrawBitmap(video_.get(), D2D1::RectF((w - vw) / 2, (h - vh) / 2, (w + vw) / 2, (h + vh) / 2),
+                                1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
     } else {
-        SetTextColor(mem, RGB(220, 220, 228));
-        HFONT font = MakeFont(18, FW_NORMAL);
-        HGDIOBJ old_font = SelectObject(mem, font);
-        RECT text{0, 0, cw, vh};
-        DrawTextW(mem, Hint(engine_.Get().status), -1, &text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        SelectObject(mem, old_font);
-        DeleteObject(font);
+        brush_->SetColor(Rgba(0xFFFFFF, 0.35f));
+        target_->DrawTextW(kIconCamera, 1, hint_icon_font_.get(), D2D1::RectF(0, h / 2 - 70, w, h / 2 - 10),
+                           brush_.get());
+        brush_->SetColor(Rgba(0xFFFFFF, 0.85f));
+        const wchar_t* hint = Hint(s.status);
+        target_->DrawTextW(hint, UINT32(wcslen(hint)), hint_font_.get(), D2D1::RectF(0, h / 2, w, h / 2 + 30),
+                           brush_.get());
     }
 
-    // Control bar.
-    Layout(engine_.Get(), cw, vh);
-    HFONT pill_font = MakeFont(15, FW_SEMIBOLD);
-    HFONT icon_font = MakeFont(18, FW_NORMAL, L"Segoe Fluent Icons");
-    HPEN no_pen = CreatePen(PS_NULL, 0, 0);
-    HGDIOBJ old_pen = SelectObject(mem, no_pen);
-    for (size_t i = 0; i < buttons_.size(); ++i) {
-        const auto& b = buttons_[i];
-        const Anim a = anims_[Key(b)];
-        // Round buttons light up when on (mirror/rotate); pills turn their label yellow when selected.
-        COLORREF fill = b.round ? Mix(RGB(38, 38, 42), RGB(84, 84, 90), a.active) : Mix(RGB(26, 26, 28), RGB(44, 44, 46), a.active);
-        fill = Mix(fill, RGB(110, 110, 116), a.hover * 0.35f);
-        // Pressed buttons shrink slightly (scale 0.94), anchored at their centre.
-        const float scale = 1.0f - 0.06f * a.press;
-        const float cx = (b.rect.left + b.rect.right) / 2.0f, cy = (b.rect.top + b.rect.bottom) / 2.0f;
-        const float hw = (b.rect.right - b.rect.left) * scale / 2, hh = (b.rect.bottom - b.rect.top) * scale / 2;
-        RECT r{int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)};
-        HBRUSH brush = CreateSolidBrush(fill);
-        HGDIOBJ old_brush = SelectObject(mem, brush);
-        if (b.round) Ellipse(mem, r.left, r.top, r.right, r.bottom);
-        else RoundRect(mem, r.left, r.top, r.right, r.bottom, int(36 * scale), int(36 * scale));
-        SelectObject(mem, old_brush);
-        DeleteObject(brush);
-        SelectObject(mem, b.round ? icon_font : pill_font);
-        SetTextColor(mem, b.round ? RGB(255, 255, 255) : Mix(RGB(255, 255, 255), kYellow, a.active));
-        RECT t = r;
-        DrawTextW(mem, b.text.c_str(), -1, &t, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    // Bottom scrim so the controls stay readable over bright video.
+    if (live && chrome_ > 0.01f) {
+        D2D1_GRADIENT_STOP stops[] = {{0.0f, Rgba(0x000000, 0.0f)}, {1.0f, Rgba(0x000000, 0.55f * chrome_)}};
+        wil::com_ptr<ID2D1GradientStopCollection> coll;
+        target_->CreateGradientStopCollection(stops, 2, coll.put());
+        wil::com_ptr<ID2D1LinearGradientBrush> grad;
+        target_->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, h - 130), D2D1::Point2F(0, h)), coll.get(),
+            grad.put());
+        target_->FillRectangle(D2D1::RectF(0, h - 130, w, h), grad.get());
     }
-    SelectObject(mem, old_pen);
-    DeleteObject(no_pen);
-    DeleteObject(pill_font);
-    DeleteObject(icon_font);
 
-    BitBlt(dc, 0, 0, cw, ch, mem, 0, 0, SRCCOPY);
-    SelectObject(mem, old);
-    DeleteObject(bmp);
-    DeleteDC(mem);
-    EndPaint(hwnd_, &ps);
+    // LIVE chip, top left (like the Camera app's recording timer).
+    if (s.status == shm::AgentStatus::Streaming && live && chrome_ > 0.01f) {
+        const std::wstring text = L"LIVE  " + Widen(s.detail);
+        wil::com_ptr<IDWriteTextLayout> layout;
+        dwrite_->CreateTextLayout(text.c_str(), UINT32(text.size()), small_font_.get(), 1000, 24, layout.put());
+        layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        DWRITE_TEXT_METRICS m{};
+        layout->GetMetrics(&m);
+        const D2D1_RECT_F chip = D2D1::RectF(16, 16, 16 + m.width + 34, 42);
+        brush_->SetColor(Rgba(kRed, 0.92f * chrome_));
+        target_->FillRoundedRectangle(D2D1::RoundedRect(chip, 6, 6), brush_.get());
+        brush_->SetColor(Rgba(0xFFFFFF, chrome_));
+        target_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(chip.left + 12, (chip.top + chip.bottom) / 2), 3.5f, 3.5f),
+                             brush_.get());
+        target_->DrawTextLayout(D2D1::Point2F(chip.left + 22, chip.top + 1), layout.get(), brush_.get());
+    }
+
+    // Controls.
+    if (chrome_ > 0.01f) {
+        // Lens capsule with a highlight that slides to the selected lens.
+        std::vector<const Button*> pills;
+        for (const auto& b : buttons_)
+            if (b.action == Action::Lens) pills.push_back(&b);
+        if (!pills.empty()) {
+            const D2D1_RECT_F cap = D2D1::RectF(pills.front()->rect.left - 4, pills.front()->rect.top - 4,
+                                                pills.back()->rect.right + 4, pills.back()->rect.bottom + 4);
+            brush_->SetColor(Rgba(0x000000, 0.45f * chrome_));
+            target_->FillRoundedRectangle(D2D1::RoundedRect(cap, 24, 24), brush_.get());
+            if (thumb_x_ >= 0) {
+                const float cy = (pills.front()->rect.top + pills.front()->rect.bottom) / 2;
+                brush_->SetColor(Rgba(0x2C2C2E, 0.95f * chrome_));
+                target_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(thumb_x_, cy), 20, 20), brush_.get());
+            }
+        }
+        for (const auto& b : buttons_) {
+            const Anim a = anims_[Key(b)];
+            const float scale = 1.0f - 0.06f * a.press;
+            const float cx = (b.rect.left + b.rect.right) / 2, cy = (b.rect.top + b.rect.bottom) / 2;
+            const float rx = (b.rect.right - b.rect.left) / 2 * scale, ry = (b.rect.bottom - b.rect.top) / 2 * scale;
+            const D2D1_RECT_F box = D2D1::RectF(cx - rx, cy - ry, cx + rx, cy + ry);
+            if (b.round) {
+                // Glass button: translucent fill, brighter when on or hovered.
+                D2D1_COLOR_F fill = Mix(Rgba(0x3A3A3C, 0.55f), Rgba(0x8E8E93, 0.65f), a.active);
+                fill = Mix(fill, Rgba(0x8E8E93, 0.75f), a.hover * 0.5f);
+                fill.a *= chrome_;
+                brush_->SetColor(fill);
+                target_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), rx, ry), brush_.get());
+                brush_->SetColor(Rgba(0xFFFFFF, chrome_));
+                target_->DrawTextW(b.text.c_str(), UINT32(b.text.size()), icon_font_.get(), box, brush_.get());
+            } else {
+                // Selected lens: yellow with the "×"; others: white number only, like the Camera app.
+                D2D1_COLOR_F color = Mix(Rgba(0xFFFFFF), Rgba(kYellow), a.active);
+                color.a = chrome_ * (0.8f + 0.2f * std::max(a.active, a.hover));
+                brush_->SetColor(color);
+                const bool selected = a.active > 0.5f;
+                const std::wstring text = selected ? b.text : b.text.substr(0, b.text.size() - 1);
+                target_->DrawTextW(text.c_str(), UINT32(text.size()), selected ? label_font_.get() : small_font_.get(),
+                                   box, brush_.get());
+            }
+        }
+    }
+
+    if (target_->EndDraw() == D2DERR_RECREATE_TARGET) {
+        target_.reset();
+        video_.reset();
+    }
 }
 
 LRESULT CALLBACK PreviewWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -305,42 +395,65 @@ LRESULT CALLBACK PreviewWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
     }
     auto* self = reinterpret_cast<PreviewWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (self) {
+        auto dip = [self](LPARAM l, float& x, float& y) {
+            x = GET_X_LPARAM(l) / self->dpi_scale_;
+            y = GET_Y_LPARAM(l) / self->dpi_scale_;
+        };
         switch (msg) {
         case WM_TIMER:
             self->Tick();
             return 0;
-        case WM_PAINT:
-            self->Paint();
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            BeginPaint(hwnd, &ps);
+            self->Render();
+            EndPaint(hwnd, &ps);
             return 0;
+        }
+        case WM_SIZE:
+            if (self->target_) self->target_->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp)));
+            return 0;
+        case WM_DPICHANGED: {
+            self->target_.reset();
+            const RECT* r = reinterpret_cast<const RECT*>(lp);
+            SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            return 0;
+        }
         case WM_ERASEBKGND:
             return 1;
         case WM_MOUSEMOVE: {
-            const POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-            const Button* b = self->HitTest(pt);
-            self->mouse_ = pt;
+            dip(lp, self->mouse_x_, self->mouse_y_);
+            self->last_mouse_ms_ = GetTickCount64();
+            SetCursor(LoadCursorW(nullptr, self->HitTest(self->mouse_x_, self->mouse_y_) ? IDC_HAND : IDC_ARROW));
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd, 0};
             TrackMouseEvent(&tme);
-            SetCursor(LoadCursorW(nullptr, b ? IDC_HAND : IDC_ARROW));
             return 0;
         }
         case WM_MOUSELEAVE:
-            self->mouse_ = POINT{-1, -1};
+            self->mouse_x_ = self->mouse_y_ = -1;
             self->pressed_key_ = -1;
             return 0;
         case WM_LBUTTONDOWN: {
-            const Button* b = self->HitTest(POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+            float x, y;
+            dip(lp, x, y);
+            const Button* b = self->HitTest(x, y);
             self->pressed_key_ = b ? Key(*b) : -1;
+            self->last_mouse_ms_ = GetTickCount64();
             return 0;
         }
-        case WM_LBUTTONUP:
-            self->Click(POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+        case WM_LBUTTONUP: {
+            float x, y;
+            dip(lp, x, y);
+            self->Click(x, y);
             self->pressed_key_ = -1;
             return 0;
+        }
         case WM_GETMINMAXINFO:
-            reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize = POINT{480, 360};
+            reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize = POINT{480, 320};
             return 0;
         case WM_CLOSE:
-            self->Hide();  // keep the window object; reopening is instant
+            self->Hide();  // keep the window; reopening is instant
             return 0;
         }
     }
