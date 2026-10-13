@@ -104,7 +104,7 @@ int wmain(int argc, wchar_t** argv) {
         }
         Device* dev = nullptr;
         for (auto& d : devices)
-            if (d.name == want) dev = &d;
+            if (d.name == want || d.name.rfind(want + L" (", 0) == 0) dev = &d;  // Windows appends " (Windows Virtual Camera)"
         if (!dev) {
             std::wprintf(L"camera \"%s\" not found\n", want.c_str());
             return 2;
