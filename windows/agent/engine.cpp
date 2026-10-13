@@ -168,10 +168,10 @@ std::string Engine::StatusJson() const {
     }
     const bool live = snap_.status == shm::AgentStatus::Streaming && snap_.fps > 0;
     return std::format(
-        R"({{"state":"{}","live":{},"device":"{}","camera":"{}","lens":"{}","width":{},"height":{},"fps":{},"mirror":{},"rotation":{},"detail":"{}","version":"{}"}})",
+        R"({{"state":"{}","live":{},"device":"{}","camera":"{}","lens":"{}","width":{},"height":{},"fps":{},"mirror":{},"rotation":{},"detail":"{}","thermal":{},"battery":{},"charging":{},"version":"{}"}})",
         StateName(snap_.status), live ? "true" : "false", JsonEscape(snap_.device_name), JsonEscape(camera), lens,
         snap_.width, snap_.height, snap_.fps, snap_.mirror ? "true" : "false", snap_.rotation,
-        JsonEscape(snap_.detail), Version());
+        JsonEscape(snap_.detail), snap_.thermal, snap_.battery, snap_.charging ? "true" : "false", Version());
 }
 
 bool Engine::CopyPreview(image::Nv12Frame& out, uint64_t& seq) const {
@@ -460,7 +460,15 @@ void Engine::RunSession(net::Socket& sock) {
                     send(proto::RequestKeyframe{});
                 }
             } else if (auto st = std::get_if<proto::Status>(&m)) {
-                if (st->thermal_state >= 2) log::Warn("iPhone thermal state {} (serious or worse)", st->thermal_state);
+                {
+                    std::lock_guard lock(mu_);
+                    if (snap_.thermal != st->thermal_state)
+                        log::Info("iPhone thermal state {} -> {} (0 nominal, 1 fair, 2 serious, 3 critical), battery {}%",
+                                  snap_.thermal, st->thermal_state, st->battery_percent);
+                    snap_.thermal = st->thermal_state;
+                    snap_.battery = st->battery_percent == 255 ? -1 : st->battery_percent;
+                    snap_.charging = st->charging != 0;
+                }
                 if (st->camera_id != 255) {
                     // The lens may have been switched on the phone: follow and remember it.
                     bool changed = false;

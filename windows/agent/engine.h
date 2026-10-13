@@ -28,6 +28,9 @@ struct Snapshot {
     uint16_t rotation = 0;
     bool status_card = false;  // show the status card instead of black while not live
     uint32_t width = 0, height = 0, fps = 0;  // format being streamed (0 when idle)
+    int thermal = -1;   // iPhone thermal state 0 nominal .. 3 critical, -1 unknown
+    int battery = -1;   // iPhone battery percent, -1 unknown
+    bool charging = false;
 };
 
 class Engine {

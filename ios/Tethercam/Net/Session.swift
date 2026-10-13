@@ -87,7 +87,10 @@ final class Session: @unchecked Sendable {
             self?.queue.async { self?.setPaused(true) }
         }
         center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil) { [weak self] _ in
-            self?.queue.async { self?.setPaused(false) }
+            self?.queue.async {
+                self?.server.relisten()  // the listening socket may not have survived suspension
+                self?.setPaused(false)
+            }
         }
         center.addObserver(forName: .AVCaptureSessionWasInterrupted, object: camera.session, queue: nil) { [weak self] _ in
             self?.queue.async { self?.setPaused(true) }

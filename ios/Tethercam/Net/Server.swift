@@ -9,6 +9,7 @@ final class Server: @unchecked Sendable {
     private var listener: NWListener?
     private var connection: NWConnection?
     private var pendingBytes = 0
+    private var listenerReady = false
 
     var onConnect: (() -> Void)?
     var onDisconnect: (() -> Void)?
@@ -28,12 +29,20 @@ final class Server: @unchecked Sendable {
         if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options { tcp.noDelay = true }
         do {
             let l = try NWListener(using: params)
-            l.stateUpdateHandler = { [weak self] state in
+            l.stateUpdateHandler = { [weak self, weak l] state in
+                guard let self, let l, self.listener === l else { return }
                 switch state {
-                case .ready: self?.onListenerState?("Listening")
+                case .ready:
+                    self.listenerReady = true
+                    self.onListenerState?("Listening")
                 case .failed(let e):
-                    self?.onListenerState?("Listener failed: \(e)")
-                    self?.restartLater()
+                    self.listenerReady = false
+                    self.onListenerState?("Listener failed: \(e)")
+                    self.restartLater()
+                case .waiting, .cancelled:
+                    // iOS tears the socket down while the app is in the background; listen again.
+                    self.listenerReady = false
+                    self.restartLater()
                 default: break
                 }
             }
@@ -46,10 +55,23 @@ final class Server: @unchecked Sendable {
         }
     }
 
-    private func restartLater() {
-        listener?.cancel()
+    private func restartLater(after seconds: Double = 1) {
+        let old = listener
         listener = nil
-        queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.start() }
+        listenerReady = false
+        old?.cancel()
+        queue.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.listener == nil else { return }
+            self.start()
+        }
+    }
+
+    /// Called when the app returns to the foreground: iOS may have closed the listening socket while
+    /// the app was suspended, so always start a fresh listener (the old one may report .ready but be dead).
+    /// Must be called on `queue`.
+    func relisten() {
+        guard connection == nil else { return }  // a live session means the socket is fine
+        restartLater(after: 0.2)
     }
 
     private func accept(_ c: NWConnection) {

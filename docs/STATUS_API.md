@@ -30,6 +30,9 @@ status card is opt-in from the tray menu), so the overlay decides what viewers s
   "mirror": true,
   "rotation": 0,
   "detail": "1920x1080 @ 30 fps, 11.8 Mbps",
+  "thermal": 0,
+  "battery": 87,
+  "charging": true,
   "version": "0.1.7"
 }
 ```
@@ -43,6 +46,7 @@ status card is opt-in from the tray menu), so the overlay decides what viewers s
 | `width`, `height`, `fps` | Format being streamed (0 when not live) |
 | `mirror`, `rotation` | Current picture options |
 | `detail` | Human-readable summary |
+| `thermal`, `battery`, `charging` | iPhone thermal state (0 nominal, 1 fair, 2 serious, 3 critical; -1 unknown), battery percent (-1 unknown), charging. Updated every 2 s while live |
 
 ## Overlay example
 

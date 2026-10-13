@@ -2,6 +2,29 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-13: Glass-to-glass latency (real iPhone)
+
+**Method:** a double-buffered millisecond clock on the left half of the monitor; the iPhone's back camera
+films it; the Tethercam window (Release agent, 1080p30, back wide lens) shows the camera on the right
+half. Full-screen screenshots show the live clock and the camera's view of it; the difference is the
+end-to-end latency (exposure + 33 ms frame interval + encode + USB + decode + display), ±~16 ms for
+monitor refresh and timer granularity.
+
+| Clock | Through the camera | Latency |
+|---|---|---|
+| 24.368 | 24.256 | 112 ms |
+| 25.787 | 25.695 | 92 ms |
+| 27.196 | 27.085 | 111 ms |
+| 28.583 | 28.494 | 89 ms |
+
+**Mean ≈ 101 ms** (89–112 ms), at the 100 ms target. (Earlier samples while the phone was being moved:
+115 and 125 ms.)
+
+**Apps on the same day:** Windows Camera app showed live iPhone video while the Tethercam window was also
+open (two consumers at once). Edge WebRTC (`getUserMedia`, the engine behind new Teams) got
+"Tethercam (Windows Virtual Camera)" at 1920×1080, and 30.0 fps steady in a 640×480 run. Streamlabs
+Desktop shows Tethercam live on both canvases.
+
 ## 2026-10-13: Real iPhone over USB
 
 **Setup:** iPhone 15 Pro Max (`iPhone16,2`, USB-C) running Tethercam 0.1.1 (sideloaded via AltStore),
