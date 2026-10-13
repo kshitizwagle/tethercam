@@ -1,0 +1,25 @@
+{
+  "name": "Tethercam",
+  "tagline": "Your iPhone as a Windows webcam over USB, at up to 4K.",
+  "summary": "Tethercam turns an iPhone into a standard Windows 11 webcam that Teams, Zoom, OBS, Streamlabs and browsers can use. The phone hardware-encodes H.264, the PC decodes it on the GPU, and a Windows 11 virtual camera hands it to any app. No account, no watermark, no Wi-Fi: plug in the cable and pick the camera.",
+  "status": "Beta",
+  "year": "2026",
+  "role": "Solo: design, Windows (C++), iOS (Swift), CI/CD",
+  "platforms": ["Windows 11", "iOS 16+"],
+  "stack": ["C++20", "Media Foundation", "Direct2D", "Win32", "Swift", "AVFoundation", "VideoToolbox", "WiX", "GitHub Actions"],
+  "icon": "icon.png",
+  "highlights": [
+    { "title": "Full resolution", "text": "Every format the phone's lenses offer, up to 3840×2160 at 60 fps, exposed as standard webcam formats." },
+    { "title": "USB only", "text": "Video travels through Apple's USB tunnel; nothing touches the network. ~100 ms glass-to-glass at 1080p30." },
+    { "title": "A real virtual camera", "text": "A Frame Server media source registered with MFCreateVirtualCamera, so it works in every Windows 11 camera app." },
+    { "title": "Built for streaming", "text": "A local status API lets stream overlays hide the camera while the phone is offline." }
+  ],
+  "screenshots": [
+    { "src": "screenshots/windows-app.png", "alt": "The Tethercam window on Windows showing a live 1080p test pattern with lens, mirror, rotate and quality controls", "caption": "The Windows app: live preview with Camera-app-style controls." }
+  ],
+  "links": [
+    { "label": "Download", "url": "https://github.com/kshitizwagle/tethercam/releases/latest", "primary": true },
+    { "label": "User guide", "url": "https://github.com/kshitizwagle/tethercam/blob/main/docs/USER_GUIDE.md" },
+    { "label": "Source", "url": "https://github.com/kshitizwagle/tethercam" }
+  ]
+}
