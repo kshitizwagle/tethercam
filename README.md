@@ -2,6 +2,8 @@
 
 **Use your iPhone as a webcam on Windows 11, over a USB cable, at up to 4K. Free and open source.**
 
+**[Project page →](https://kshitizwagle.com.np/projects/tethercam)**
+
 Tethercam turns an iPhone into a standard Windows webcam that Teams, Zoom, OBS, Streamlabs, browsers
 and the Camera app can use. No account, no watermark, no Wi-Fi, no overlays: plug in the cable, open
 the app, pick **Tethercam (Windows Virtual Camera)**.
