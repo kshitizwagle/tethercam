@@ -19,6 +19,11 @@ no overlays. GPL-3.0.
 ## Rules
 - **Status API is a stable contract** (docs/STATUS_API.md): the stream dashboard in
   `C:\Users\Admin\dev\streaming` follows `http://127.0.0.1:4790/events` and the `live` field.
+- **Portfolio page** (kshitizwagle.com.np/projects/tethercam) is built from `.portfolio/project.json` + images
+  by the portfolio site (rebuilds every 5 h). Rules: images png/jpg/jpeg/webp/gif/avif (no SVG); paths
+  relative to `.portfolio/`, segments start with a letter/digit, no `..`, `/` or `\`; every screenshot needs
+  `alt`; links https, max 6; caps: stack 20, platforms 8, highlights 8 (title+text), screenshots 12;
+  tagline ≤160, summary ≤1200, status ≤32 chars.
 - **Don't edit Streamlabs scenes from this repo.** Scene changes belong to the streaming project
   (`C:\Users\Admin\dev\streaming`, see its CLAUDE.md: both canvases, locked items, hidden partners).
 - **Clean room:** never decompile, trace or copy Camo or any other commercial webcam app. Use public
