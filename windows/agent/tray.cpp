@@ -181,7 +181,7 @@ void Tray::ShowMenu() {
     std::wstring status = StatusText(s.status);
     if (!s.device_name.empty()) status += L": " + Widen(s.device_name);
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status.c_str());
-    AppendMenuW(menu, MF_STRING, kPreview, L"Show preview");
+    AppendMenuW(menu, MF_STRING, kPreview, L"Open Tethercam");
     SetMenuDefaultItem(menu, kPreview, FALSE);
     if (!s.detail.empty()) AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, Widen(s.detail).c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);

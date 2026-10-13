@@ -51,8 +51,8 @@ size the app asked for (up to 3840×2160 at 60 fps) when it can; otherwise the a
 4. Pick **Tethercam** as the camera in your video app.
 
 The tray icon shows the state: grey = no iPhone, amber = iPhone found but the app isn't open (or it's
-paused), green = connected, green with a white dot = streaming. Click it to open a live **preview** window
-(it starts the iPhone camera even if no app is using Tethercam). Right-click it to switch lenses, mirror
+paused), green = connected, green with a white dot = streaming. Click it to open the **Tethercam window** with live video and camera
+controls (it starts the iPhone camera even if no app is using Tethercam). Right-click it to switch lenses, mirror
 or rotate the picture, or open the log folder (`%LOCALAPPDATA%\Tethercam\logs`).
 
 ## Build
