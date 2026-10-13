@@ -30,6 +30,9 @@ no overlays. GPL-3.0.
 - `fakephone` simulates the device over TCP; run the agent with `--tcp 127.0.0.1:5321`.
 - `vcamcheck direct --dll <tethercam-vcam.dll>` loads the camera in-process; set
   `TETHERCAM_SHM_NAMESPACE=Local` for both it and the agent.
+- The Swift toolchain on the Windows PC can compile platform-neutral Swift (e.g. `ios/Tethercam/Protocol/Wire.swift`)
+  with `swiftc -swift-version 6`; it needs `SDKROOT` set and `Swift\Runtimes\<ver>\usr\bin` on PATH to run.
+  AVFoundation/UIKit code only builds in the macOS CI (`ios.yml`), which also produces the unsigned IPA.
 - Registering the real camera needs admin: `windows/scripts/dev-install.ps1` (elevated) or the MSI.
 
 ## Build
