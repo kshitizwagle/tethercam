@@ -10,7 +10,6 @@
 #include "tethercam/version.h"
 
 namespace tethercam::agent {
-namespace {
 
 const char* StatusText(AgentStatus s) {
     switch (s) {
@@ -23,6 +22,8 @@ const char* StatusText(AgentStatus s) {
     default: return "Starting";
     }
 }
+
+namespace {
 
 // Themed icon names present in Adwaita and Breeze. Themes without them (and trays that can't resolve
 // them) get the app's own icon, which the package installs into hicolor.
@@ -98,6 +99,11 @@ void Tray::Create() {
     Rebuild();
 }
 
+void Tray::ShowPreview() {
+    if (!preview_) preview_ = std::make_unique<Preview>(engine_);
+    preview_->Show();
+}
+
 void Tray::Refresh() { g_idle_add(&Tray::OnIdle, this); }
 
 int Tray::OnIdle(void* self) {
@@ -106,6 +112,7 @@ int Tray::OnIdle(void* self) {
 }
 
 void Tray::Rebuild() {
+    if (preview_) preview_->Sync();
     const Snapshot s = engine_.Get();
     const std::string device = engine_.CameraDevice();
     // Skip identical rebuilds (status JSON covers everything the menu shows, plus the device path).
@@ -118,6 +125,8 @@ void Tray::Rebuild() {
     building_ = true;
     GtkWidget* menu = gtk_menu_new();
 
+    OnActivate(Item(menu, "Open Tethercam"), [this] { ShowPreview(); });
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
     std::string status = StatusText(s.status);
     if (!s.device_name.empty()) status += ": " + s.device_name;
     Item(menu, status, false);

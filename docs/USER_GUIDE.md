@@ -284,6 +284,9 @@ rejected by service".
 - **Demand detection** works by noticing which processes have the camera open. Apps in containers that
   hide their processes (some Snap/Flatpak setups) may not be seen; run the agent with `--always-on` then
   (`systemctl --user edit tethercam-agent`, add `ExecStart=` and `ExecStart=/usr/bin/tethercam-agent --always-on`).
+- **Preview.** Choose **Open Tethercam** in the tray menu (or start the agent with `--preview`) to see the
+  camera in a window, with lens, mirror, rotate and quality controls. While it's open the iPhone keeps
+  streaming even if no app uses the camera.
 - **Settings** are in `~/.config/tethercam/settings`, **logs** in `~/.local/state/tethercam/agent.log`.
 - The status API is the same: `http://127.0.0.1:4790`.
 

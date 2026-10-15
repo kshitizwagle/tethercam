@@ -1,5 +1,6 @@
 #include "engine.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <format>
 
@@ -86,6 +87,14 @@ void Engine::SetMirror(bool mirror) {
     settings_.Set("Mirror", mirror ? "1" : "0");
     options_dirty_ = true;
     Notify();
+}
+
+bool Engine::CopyPreview(image::Nv12Frame& out, uint64_t& seq) const {
+    std::lock_guard lock(preview_mu_);
+    if (preview_seq_ == seq || preview_.width == 0) return false;
+    out = preview_;
+    seq = preview_seq_;
+    return true;
 }
 
 void Engine::SetRotation(uint16_t degrees) {
@@ -381,6 +390,15 @@ void Engine::RunSession(net::Socket& sock) {
                 if (vf->IsKeyframe()) au = parameter_sets;
                 au.insert(au.end(), vf->data.begin(), vf->data.end());
                 const bool ok = decoder.Decode(au, int64_t(vf->pts_us), [&](const image::Nv12View& v, int64_t) {
+                    if (preview_active_) {
+                        // Keep a small copy for the preview window, at the source's aspect ratio.
+                        const uint32_t pw = std::min<uint32_t>(1280, v.width) & ~1u;
+                        const uint32_t ph = static_cast<uint32_t>(uint64_t(pw) * v.height / v.width) & ~1u;
+                        std::lock_guard lock(preview_mu_);
+                        if (preview_.width != pw || preview_.height != ph) preview_.Resize(pw, ph);
+                        image::ScaleLetterbox(v, preview_);
+                        ++preview_seq_;
+                    }
                     if (out_.IsOpen() && out_.Write(v)) last_write_ = Clock::now();
                 });
                 if (!ok) {
@@ -442,7 +460,11 @@ void Engine::RunSession(net::Socket& sock) {
             }
             camera_dirty_ = true;
         }
-        const Consumer consumer = TickCamera();
+        Consumer consumer = TickCamera();
+        if (!(consumer.active && consumer.format.width) && preview_active_) {
+            consumer.active = true;  // only the preview window is watching
+            consumer.format = kAutoFormat;
+        }
         if (have_caps) {
             if (consumer.active && consumer.format.width) {
                 consumer_gone_since = {};

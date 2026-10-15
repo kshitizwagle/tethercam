@@ -45,6 +45,7 @@ void Usage() {
         "  --nv12              write NV12 instead of YUYV (smaller; not every app accepts it)\n"
         "  --software-decode   don't try VA-API\n"
         "  --always-on         stream even when no app seems to have the camera open\n"
+        "  --preview           open the camera preview window at startup (tray mode)\n"
         "  --no-tray           run without a tray icon\n"
         "  --no-status-api     don't serve http://127.0.0.1:4790\n"
         "  --verbose           debug logging\n"
@@ -55,7 +56,7 @@ void Usage() {
 
 int main(int argc, char** argv) {
     agent::Engine::Options opt;
-    bool tray = true, status_api = true;
+    bool tray = true, status_api = true, preview = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto next = [&]() -> std::string {
@@ -70,6 +71,7 @@ int main(int argc, char** argv) {
         else if (a == "--nv12") opt.pixel_format = agent::PixelFormat::Nv12;
         else if (a == "--software-decode") opt.prefer_hardware_decode = false;
         else if (a == "--always-on") opt.always_on = true;
+        else if (a == "--preview") preview = true;
         else if (a == "--no-tray") tray = false;
         else if (a == "--no-status-api") status_api = false;
         else if (a == "--verbose") log::SetMinLevel(log::Level::Debug);
@@ -106,6 +108,7 @@ int main(int argc, char** argv) {
     if (tray && agent::Tray::Available(&argc, &argv)) {
         agent::Tray t(engine, log_dir);
         t.Create();
+        if (preview) t.ShowPreview();
         engine.Start([&] {
             status.Broadcast();
             t.Refresh();

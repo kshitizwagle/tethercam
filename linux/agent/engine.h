@@ -13,6 +13,7 @@
 #include "settings.h"
 #include "tethercam/agent_state.h"
 #include "tethercam/formats.h"
+#include "tethercam/image.h"
 #include "tethercam/net.h"
 #include "tethercam/protocol.h"
 #include "v4l2_output.h"
@@ -44,6 +45,11 @@ public:
     std::string StatusJson() const;
     // Path of the virtual camera device, or empty while there's none.
     std::string CameraDevice() const;
+    // The preview window counts as a consumer: while it's open the phone streams even if no app
+    // has the camera open.
+    void SetPreview(bool active) { preview_active_ = active; }
+    // Copies the latest preview frame (at most 1280 wide) if it's newer than `seq`. Thread-safe.
+    bool CopyPreview(image::Nv12Frame& out, uint64_t& seq) const;
 
 private:
     struct Consumer {
@@ -81,6 +87,11 @@ private:
     std::chrono::steady_clock::time_point last_write_{}, last_scan_{}, last_open_try_{};
     int openers_ = 0;
     bool warned_no_device_ = false;
+
+    std::atomic<bool> preview_active_{false};
+    mutable std::mutex preview_mu_;
+    image::Nv12Frame preview_;
+    uint64_t preview_seq_ = 0;
 };
 
 }  // namespace tethercam::agent

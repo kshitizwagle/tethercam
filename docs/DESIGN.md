@@ -172,6 +172,11 @@ stable contract and timing limits; the service does not carry video or control c
   by its `max_openers` sysfs attribute), `VIDIOC_S_FMT` on the OUTPUT queue (YUYV default, NV12 with
   `--nv12`, BT.601 limited), letterbox-scales with `image::ScaleLetterbox` and `write()`s whole frames.
 - `settings.cpp`: `key=value` file, written atomically (temp + rename). Same keys as the Windows registry.
+- `preview.cpp`: GTK3 preview window (**Open Tethercam** in the tray, or `--preview`): a `GtkDrawingArea`
+  paints a cairo `RGB24` surface (`Nv12ToBgra`), letterboxed, refreshed at ~30 Hz by a `g_timeout` that
+  calls `Engine::CopyPreview`; toolbar has lens buttons, Mirror, Rotate and Quality. The engine keeps a
+  scaled copy (max 1280 wide) only while `SetPreview(true)`, and an open window counts as a consumer
+  (1080p30) so the phone streams without an app. Closing hides the window and stops the feed.
 - `tray.cpp`: AyatanaAppIndicator menu rebuilt on the GTK thread (`g_idle_add`) when the status changes;
   optional at build time (`TETHERCAM_TRAY`). `main.cpp` takes a per-user `flock` in `$XDG_RUNTIME_DIR`
   so the systemd user service and a manual start can't both run.

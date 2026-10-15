@@ -1,14 +1,18 @@
 #pragma once
 
 // Tray icon through StatusNotifierItem (AyatanaAppIndicator): status, lens, quality, mirror, rotate,
-// log folder, quit. Same menu as the Windows tray (docs/PRODUCT.md). Runs the GTK main loop.
+// log folder, quit; "Open Tethercam" shows the preview window. Same menu as the Windows tray (docs/PRODUCT.md). Runs the GTK main loop.
 
 #include <filesystem>
+#include <memory>
 #include <string>
 
 #include "engine.h"
+#include "preview.h"
 
 namespace tethercam::agent {
+
+const char* StatusText(AgentStatus status);
 
 class Tray {
 public:
@@ -18,6 +22,8 @@ public:
     static bool Available(int* argc, char*** argv);
     // Creates the icon; call before Run().
     void Create();
+    // Opens (or raises) the camera preview window. GTK thread only.
+    void ShowPreview();
     // Thread-safe: schedules a refresh on the GTK thread.
     void Refresh();
     // Runs until Quit (menu, SIGINT or SIGTERM).
@@ -32,6 +38,7 @@ private:
     void* indicator_ = nullptr;
     std::string last_key_;
     bool building_ = false;
+    std::unique_ptr<Preview> preview_;
 };
 
 }  // namespace tethercam::agent
