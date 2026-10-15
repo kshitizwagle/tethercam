@@ -22,8 +22,9 @@ loopback device: the last live frame (luma 56) is held for ~0.85 s after the sou
 (luma 16) until the stall exceeds the 750 ms window; live frames resume ~0.1 s after `SIGCONT`. Before
 the change, the first 100 ms of any stall already went black.
 
-**Not re-measured:** the Windows host (FrameReady handoff, host-clock PTS, MMCSS, GPU scale) needs an
-MSVC build and the same harness (target: ≤ 10 % frame loss at load24; M10 exit criterion).
+**Not re-measured:** the Windows host (FrameReady handoff, host-clock PTS, MMCSS, GPU scale) builds and
+passes its tests in CI (v0.1.12) but still needs the load harness on a Windows machine (target: ≤ 10 %
+frame loss at load24; M10 exit criterion).
 
 ## 2026-10-13: Glass-to-glass latency in Streamlabs (app 0.1.10, agent 0.1.11)
 
