@@ -430,9 +430,8 @@ bool Nv12Scaler::Init(ID3D11Device* device) {
     impl_ = std::make_unique<Impl>();
     if (!device) return false;
     auto& d = *impl_;
-    d.device.reset(device);
-    d.device->AddRef();  // wil::reset takes ownership, the decoder keeps its own reference
-    if (FAILED(d.device->GetImmediateContext(&d.context))) return false;
+    d.device = device;  // wil's raw-pointer assignment AddRefs; the decoder keeps its own reference
+    d.device->GetImmediateContext(&d.context);  // returns void, always succeeds
     if (!(d.video = d.device.try_query<ID3D11VideoDevice>())) return false;
     if (!(d.video_ctx = d.device.try_query<ID3D11VideoContext>())) return false;
     return true;
@@ -470,7 +469,7 @@ bool Nv12Scaler::Scale(const DecodedFrame& src, uint32_t dst_width, uint32_t dst
     const image::Rect fit = image::LetterboxRect(src.display_width, src.display_height, dst_width, dst_height);
     const RECT dst_rect{LONG(fit.x), LONG(fit.y), LONG(fit.x + fit.w), LONG(fit.y + fit.h)};
     d.video_ctx->VideoProcessorSetStreamSourceRect(d.processor.get(), 0, TRUE, &src_rect);
-    d.video_ctx->VideoProcessorSetStreamOutputRect(d.processor.get(), 0, &dst_rect);
+    d.video_ctx->VideoProcessorSetStreamDestRect(d.processor.get(), 0, TRUE, &dst_rect);
 
     D3D11_VIDEO_PROCESSOR_STREAM stream{};
     stream.Enable = TRUE;
