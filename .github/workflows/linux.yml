@@ -1,0 +1,57 @@
+name: linux
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+jobs:
+  build:
+    # One package per distro release: each links that release's FFmpeg ABI (libavcodec60, 62, ...).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ubuntu24.04
+            image: ubuntu:24.04
+            package: DEB
+          - target: ubuntu26.04
+            image: ubuntu:26.04
+            package: DEB
+          - target: fedora
+            image: fedora:latest
+            package: RPM
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install build dependencies (Debian/Ubuntu)
+        if: matrix.package == 'DEB'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates cmake make g++ pkg-config file dpkg-dev \
+            libavcodec-dev libavutil-dev libgtk-3-dev libayatana-appindicator3-dev
+      - name: Install build dependencies (Fedora)
+        if: matrix.package == 'RPM'
+        # ffmpeg-free decodes H.264 through OpenH264 or VA-API; RPM Fusion's ffmpeg-libs also satisfies it.
+        run: |
+          dnf install -y git cmake make gcc-c++ pkgconf-pkg-config rpm-build file \
+            ffmpeg-free-devel gtk3-devel libayatana-appindicator-gtk3-devel
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S linux -B build/linux -DCMAKE_BUILD_TYPE=Release "-DTETHERCAM_BUILD_VERSION=${{ inputs.version }}" -DTETHERCAM_PACKAGE_TARGET=${{ matrix.target }}
+      - name: Build
+        run: cmake --build build/linux -j4
+      - name: Test
+        run: ctest --test-dir build/linux --output-on-failure
+      - name: Package
+        run: cd build/linux && cpack -G ${{ matrix.package }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tethercam-linux-${{ matrix.target }}
+          path: |
+            build/linux/Tethercam-*.deb
+            build/linux/Tethercam-*.rpm

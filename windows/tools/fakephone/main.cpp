@@ -3,6 +3,8 @@
 //
 //   fakephone [--port 5321] [--max WxH]
 //
+// Builds on Windows (Media Foundation encoder) and Linux (FFmpeg encoder, linux/agent/encoder.h).
+//
 // Connect with:  tethercam-agent --tcp 127.0.0.1:5321   or   tcprobe stream --tcp 127.0.0.1:5321
 
 #include <chrono>
@@ -15,7 +17,11 @@
 #include "tethercam/formats.h"
 #include "tethercam/image.h"
 #include "tethercam/log.h"
+#ifdef _WIN32
 #include "tethercam/media.h"
+#else
+#include "encoder.h"  // linux/agent: FFmpeg encoder with the same interface
+#endif
 #include "tethercam/net.h"
 #include "tethercam/protocol.h"
 #include "tethercam/version.h"
@@ -224,10 +230,12 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string k = argv[i];
         if (k == "--port" && i + 1 < argc) port = static_cast<uint16_t>(std::atoi(argv[++i]));
-        else if (k == "--max" && i + 1 < argc) sscanf_s(argv[++i], "%ux%u", &max_w, &max_h);
+        else if (k == "--max" && i + 1 < argc) std::sscanf(argv[++i], "%ux%u", &max_w, &max_h);
     }
+#ifdef _WIN32
     media::MfScope mf;
     if (!mf.Ok()) return std::fprintf(stderr, "Media Foundation unavailable\n"), 1;
+#endif
     auto listener = net::ListenTcp("127.0.0.1", port);
     if (!listener.Valid()) return std::fprintf(stderr, "cannot listen on 127.0.0.1:%u\n", port), 1;
     log::Info("fakephone {} listening on 127.0.0.1:{}", Version(), port);

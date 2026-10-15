@@ -15,6 +15,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 | M6 | Robustness | 🟨 lock/unlock + replug + lens restore verified on device; sleep/resume, 1 h soak pending |
 | M7 | Release v0.1 | ✅ every green main build publishes MSI + IPA as Latest; AltStore source auto-updated |
 | M8 | Backlog | ⬜ |
+| M9 | Linux host | 🟨 agent, tray, packages done and verified with fakephone; package install and real iPhone pending |
 
 ## M0: Foundations
 **Goal:** a project anyone can clone, understand and build.
@@ -90,3 +91,14 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 Audio (virtual microphone), HEVC, Windows 10 DirectShow fallback, focus/exposure, GPU scaling and shared
 D3D11 textures, Swift 6 language mode, ARM64, choosing between several phones, usbmuxd `Listen` instead of
 polling.
+
+## M9: Linux host
+**Goal:** the same iPhone works as a webcam on Linux desktops, installed from a .deb or .rpm.
+**Exit criteria:**
+- [x] Shared core moved to top-level `common/` and builds on Windows (MSVC) and Linux (GCC/Clang); unit tests pass on both in CI
+- [x] `linux/` agent: usbmuxd over `/var/run/usbmuxd`, FFmpeg decode (VA-API + software fallback), writes NV12/YUYV to a v4l2loopback device (fakephone, 1080p30 VA-API and 4K30 software verified)
+- [x] Black frame with no phone; demand-driven Start/Stop when a client opens the camera (fakephone)
+- [x] Status API on 127.0.0.1:4790 unchanged (STATUS_API.md contract; shared code + contract test)
+- [x] Tray via StatusNotifierItem (KDE; GNOME with the AppIndicator extension); systemd user service starts the agent at login (tray starts on Ubuntu 26.04 GNOME/Wayland; login autostart not yet tried from an installed package)
+- [ ] `.deb` + `.rpm` built in CI with dependencies on `v4l2loopback-dkms` and `usbmuxd` (built and tested in Ubuntu 24.04/26.04 and Fedora containers; install → service enabled → agent runs → uninstall → service disabled verified in clean Ubuntu 26.04 and Fedora containers); install on a real desktop with the module loaded pending (admin)
+- [ ] Real iPhone verified in Firefox, Chromium, OBS and Zoom on Linux (device)

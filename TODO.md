@@ -4,6 +4,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 [MILESTONES.md](MILESTONES.md).
 
 ## Next up
+- [ ] M9 Linux host: `sudo apt install ./linux/build/rel/Tethercam-*.deb`, log out/in, check the service + tray autostart; then a real iPhone on Linux (Q7 pairing, Firefox/Chromium/OBS/Zoom rows in compat.md)
 - [x] Synchronized quality menus on iPhone, Windows preview and tray: Auto, 1080p30/60, 4K30/60; capture overrides, persistence and capability fallback
 - [ ] Build the updated iPhone app on macOS/CI and validate quality switching on the iPhone 15 Pro Max front camera; local Swift protocol checks pass, UIKit/AVFoundation build pending
 - [x] App installed via the AltStore source; permission prompt, preview, auto-rotation, Camera-app UI verified (0.1.4)
@@ -14,6 +15,18 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 - [x] Camera registered machine-wide; Frame Server path verified (2026-10-13)
 - [x] iPhone visible over USB (`type=USB`, product 0x12a8) after Trust; usbmuxd Connect reaches the phone
 - [x] GitHub repo public, CI green (Windows + iOS)
+
+## M9: Linux host
+- [x] Move `windows/common` → `common/`; POSIX paths in `net`/`log`/`usbmux`; Linux CI job runs the unit tests (shm stays Windows-only)
+- [x] Q6 answered (`/proc` opener scan); Q7 needs a real iPhone
+- [x] `linux/agent`: usbmux over Unix socket, session loop mirroring Windows (status types/JSON/server shared)
+- [x] FFmpeg decoder (VA-API + software) and NV12/YUYV writer to v4l2loopback; black frames while idle
+- [x] Status API server on 4790 (moved to `common/`, contract test)
+- [x] SNI tray + systemd user unit, single-instance lock
+- [x] `.deb`/`.rpm` (CPack) per distro target with `v4l2loopback-dkms`/`usbmuxd` deps and modprobe config; release assets
+- [x] USER_GUIDE/DEVELOPMENT/README Linux sections
+- [ ] Compat matrix rows for Linux apps (device)
+- [ ] Later: one engine shared by both hosts (today `linux/agent/engine.cpp` mirrors the Windows one)
 
 ## M1: Risk spikes
 - [x] usbmuxd client (`common/usbmux`) + `tcprobe list` against Apple Devices 1.1540
@@ -76,6 +89,8 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 - [x] Release workflow with checksums (MSI + unsigned IPA); pre-release tag v0.1.0-alpha.1
 
 ## Session log
+- 2026-10-15 (2): GPU preference for decode: Linux tries dGPU then iGPU (VA-API, NVDEC on NVIDIA, `TETHERCAM_HW_DEVICE` override), verified on RX 9070 XT + Raphael with fakephone; Windows picks the adapter via `EnumAdapterByGpuPreference(HIGH_PERFORMANCE)` with an H.264 VLD check (needs a Windows build). Linux app icon fixed (hicolor has no 1024 dir; ship 16–512) and tray falls back to the app icon.
+- 2026-10-15: Linux host planned as M9 (TECH_SPEC §13, R8–R9, Q6–Q7; PLAN phase 9; MILESTONES; PRODUCT). Moved the core to `common/`, made sockets/logging/usbmux portable (Unix-socket usbmuxd, `UNIX:` addresses), added `linux/` CMake root and `linux.yml` CI. Then the Linux agent: FFmpeg VA-API/software decode, v4l2loopback output with `/proc` opener detection, settings file, AppIndicator tray, flock single instance, fakephone on Linux, CPack .deb/.rpm per distro + CI matrix. Verified: fakephone → agent → /dev/video42 → v4l2-ctl at 29.6 fps 1080p (VA-API) and 4K30 NV12 (software), start/stop on open/close, status API live/connected; 37 tests pass on Ubuntu 24.04, 26.04 (GCC 15) and Fedora containers. Package install/uninstall verified in clean Ubuntu 26.04 and Fedora containers. Not verified: Windows build (CI), install on this desktop (needs sudo), real iPhone on Linux.
 - 2026-10-13 (3): OBS/Streamlabs scene switches no longer stop the iPhone (vcam re-asserts `consumer_active`; v0.1.11). Streamlabs latency measured at ~135 ms glass-to-glass (perf.md); sync fix is on the Streamlabs side. Long USB cable caused drops. Open: measure VDO.Ninja the same way; the remaining ~20–30 ms (vcam pacing phase, 4K encoder frame delay) if worth it.
 - 2026-10-13 (5): Added capture quality controls to both apps and a backward-compatible SetQuality protocol message. Added per-lens availability, reconnect policy, source-format reporting and stale capture-completion guards. Windows Debug build and 37 tests pass, including actual engine-loop synchronization/reconnect tests; Swift 6 standalone protocol check passes all 18 golden vectors and quality validation, and changed UI/session files pass syntax parsing. Release companion built at `build/quality-release/agent/Release/tethercam-agent.exe` because the usual Release executable is locked by a running process. Device/UI testing and full iOS build remain pending. Changes are local, uncommitted and not installed/published.
 - 2026-10-13 (4): Resumed Claude session 7aa00575-0b51-4328-807d-61ebfe13eca4 after its documentation pass was interrupted. Completed USER_GUIDE, STREAMING, DEVELOPMENT and README; corrected DESIGN and STATUS_API against source and CI. Reconciled recorded latency/app checks without treating Edge as a Teams test or preview demand as a second virtual-camera client. 4K60 retest, 1-hour soak result and sleep/resume remain open. Documentation/link checks only; no new hardware tests.

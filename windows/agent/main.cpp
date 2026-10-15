@@ -21,7 +21,7 @@
 
 #include "engine.h"
 #include "install.h"
-#include "status_server.h"
+#include "tethercam/status_server.h"
 #include "tethercam/log.h"
 #include "tethercam/media.h"
 #include "tethercam/version.h"

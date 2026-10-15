@@ -1,0 +1,14 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "linux",
+      "displayName": "Linux (Unix Makefiles)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ],
+  "buildPresets": [ { "name": "debug", "configurePreset": "linux" } ],
+  "testPresets": [ { "name": "debug", "configurePreset": "linux", "output": { "outputOnFailure": true } } ]
+}

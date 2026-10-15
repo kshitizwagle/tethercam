@@ -1,0 +1,4 @@
+include(GoogleTest)
+add_executable(tcam_linux_tests linux_agent_test.cpp)
+target_link_libraries(tcam_linux_tests PRIVATE tcam_linux_agent GTest::gtest_main)
+gtest_discover_tests(tcam_linux_tests)

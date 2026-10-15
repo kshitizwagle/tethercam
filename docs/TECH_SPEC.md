@@ -5,8 +5,8 @@ Status: draft v1 · Owner: project maintainers · Related: [PRODUCT.md](PRODUCT.
 
 ## 1. Scope
 
-Tethercam streams video from an iPhone camera to a Windows 11 PC over USB and exposes it as a system
-webcam. v1 is video only, H.264, wired only. See [PRODUCT.md](PRODUCT.md) for goals and non-goals.
+Tethercam streams video from an iPhone camera to a Windows 11 or Linux PC over USB and exposes it as a
+system webcam. Linux support is milestone M9 (§13). v1 is video only, H.264, wired only. See [PRODUCT.md](PRODUCT.md) for goals and non-goals.
 
 ## 2. Requirements
 
@@ -39,6 +39,8 @@ webcam. v1 is video only, H.264, wired only. See [PRODUCT.md](PRODUCT.md) for go
 
 - Windows 11 (build 22000+) x64. ARM64 is a stretch goal; the code should stay architecture-neutral.
 - Apple Mobile Device Service (installed by the Apple Devices app or iTunes).
+- Linux x86_64 (M9): kernel with `v4l2loopback` (DKMS), `usbmuxd` from the distro, FFmpeg ≥ 6. Ubuntu
+  24.04+ and Fedora 40+ are the tested targets.
 - iOS 16+ (for the `AVCaptureDevice` and VideoToolbox low-latency APIs we use). Built with Xcode 16+.
 
 ## 3. Architecture
@@ -228,6 +230,8 @@ polls for it every 500 ms, so it's idle exactly when no consumer exists.
 | R4 Some apps reject NV12-only cameras | Missing in some apps | Also offer YUY2 (CPU conversion) if testing shows a need |
 | R5 Thermal throttling at 4K60 | Dropped fps | Thermal policy (§5); recommend a phone holder without a case; measure in M5 |
 | R6 iOS kills capture when the screen locks or the app is backgrounded | Video stops | Keep the screen on, dim the preview; clear "Paused on iPhone" placeholder; fast resume |
+| R8 v4l2loopback is an out-of-tree kernel module (Secure Boot signing, kernel upgrades) | Camera missing on Linux | Depend on the distro's `v4l2loopback-dkms`; the agent detects a missing `/dev/video*` loopback device and says how to fix it; document MOK enrolment for Secure Boot |
+| R9 v4l2loopback has no per-open media-type negotiation like Frame Server | Linux can't honour F5 per app | The agent picks the output format from the tray/quality setting; consumers get that size. Scaling stays in the agent |
 | R7 4K60 NV12 copy cost (~750 MB/s) | CPU/latency | Measure in M5; optimize with shared D3D11 textures (`IDXGIResource1::CreateSharedHandle`) if needed |
 
 ## 12. Open questions
@@ -238,4 +242,28 @@ polls for it every 500 ms, so it's idle exactly when no consumer exists.
 | Q2 | Is `MFVirtualCameraAccess_AllUsers` + `Lifetime_System` the right combination, or should each user register their own? | Partly answered: per-user COM registration fails (see R2), so the MSI registers machine-wide with AllUsers + System lifetime. Confirm on an elevated install |
 | Q3 | Which media type does each target app (Teams, Zoom, Chrome, OBS) actually pick from our list? | M4 compatibility matrix |
 | Q4 | Can the agent change the stream size mid-session without the consumer re-opening the camera, e.g. on a lens switch with a different max size? | **Answered by design:** the agent always delivers the consumer's size and scales/letterboxes whatever the phone sends (implemented) |
+| Q6 | How does the Linux agent learn that a client opened the camera (F6)? | **Answered 2026-10-15:** the agent scans `/proc/*/fd` every 500 ms for other processes holding the device (works on every v4l2loopback version; verified with `v4l2-ctl` on 0.15.3: start on open, stop 2 s after close). Processes in a hidden PID namespace aren't seen; `--always-on` covers that. The v4l2loopback client-usage event is a possible refinement |
+| Q7 | Does `usbmuxd` on Linux handle the Trust/pairing prompt without extra tools? | Open (needs a real iPhone on Linux). The agent only needs usbmuxd's `Connect`, which works once the phone is paired; `idevicepair pair` is the documented fallback |
 | Q5 | Can App Store distribution happen without a paid developer account? (Not needed for development: free accounts can sideload for 7 days.) | Before M7 |
+
+## 13. Linux host (M9)
+
+Same phone app, same protocol and same Status API; only the PC side changes.
+
+| Concern | Windows | Linux |
+|---|---|---|
+| USB transport | Apple usbmuxd on 127.0.0.1:27015 | Open-source `usbmuxd` on the Unix socket `/var/run/usbmuxd` (same plist protocol) |
+| Decode | MF H.264 MFT, D3D11 | FFmpeg `h264` with VA-API/NVDEC hwaccel (dGPU, then iGPU), software fallback, low-delay flags |
+| Virtual camera | FrameServer media source DLL + shared memory | `v4l2loopback` device labelled "Tethercam"; the agent writes frames to it directly (no second process, no shm) |
+| Demand signal (F6) | `consumer_active` in the control block | Other processes holding the device open (Q6) |
+| Formats (F4/F5) | Negotiated per app | Agent-chosen (R9); NV12 and YUYV offered |
+| UI | Win32 tray | StatusNotifierItem tray (AyatanaAppIndicator); settings in `$XDG_CONFIG_HOME/tethercam/settings`, logs in `$XDG_STATE_HOME/tethercam` |
+| Autostart | Run key | systemd user unit `tethercam-agent.service` |
+| Packaging | WiX MSI | `.deb` + `.rpm`; module config `options v4l2loopback exclusive_caps=1 card_label=Tethercam` |
+
+`exclusive_caps=1` is required so Chromium/WebRTC lists the loopback device as a capture device.
+Code layout: the platform-neutral core lives in `common/` (sockets and logging have POSIX paths; usbmux
+reaches `/var/run/usbmuxd` by default on Linux; the status types, status JSON and status server are
+shared). `linux/agent` holds the Linux-only parts; its session loop mirrors `windows/agent/engine.cpp`
+(keep the two in step until a shared engine exists). Packages are built per distro release because each
+links that release's FFmpeg ABI.

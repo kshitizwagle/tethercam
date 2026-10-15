@@ -51,8 +51,17 @@ std::optional<plist::Value> DecodeBody(std::span<const uint8_t> payload);
 std::optional<std::vector<Device>> ParseDeviceList(const plist::Value& reply);
 std::optional<Event> ParseEvent(const plist::Value& msg);
 
-// Address of usbmuxd: USBMUXD_SOCKET_ADDRESS ("host:port") or 127.0.0.1:27015.
-std::pair<std::string, uint16_t> ServiceAddress();
+// Where usbmuxd listens. Either a Unix socket path or a TCP host:port.
+struct ServiceAddr {
+    std::string unix_path;
+    std::string host;
+    uint16_t port = 0;
+};
+inline constexpr const char* kDefaultUnixPath = "/var/run/usbmuxd";
+// Parses a USBMUXD_SOCKET_ADDRESS value ("host:port" or "UNIX:/path", as libimobiledevice does).
+std::optional<ServiceAddr> ParseServiceAddress(std::string_view value);
+// USBMUXD_SOCKET_ADDRESS if set and valid, else 127.0.0.1:27015 on Windows and /var/run/usbmuxd elsewhere.
+ServiceAddr ServiceAddress();
 
 class Client {
 public:

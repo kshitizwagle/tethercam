@@ -1,0 +1,16 @@
+# Tethercam agent for the logged-in user: connects to the iPhone and feeds the virtual camera.
+# Enabled for every user by the package (systemctl --global enable); disable per user with
+#   systemctl --user disable --now tethercam-agent
+[Unit]
+Description=Tethercam (iPhone webcam over USB)
+Documentation=https://github.com/kshitizwagle/tethercam/blob/main/docs/USER_GUIDE.md
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/tethercam-agent
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

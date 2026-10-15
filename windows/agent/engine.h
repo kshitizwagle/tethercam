@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "tethercam/agent_state.h"
 #include "tethercam/formats.h"
 #include "tethercam/image.h"
 #include "tethercam/net.h"
@@ -17,22 +18,6 @@
 #include "tethercam/shm.h"
 
 namespace tethercam::agent {
-
-struct Snapshot {
-    shm::AgentStatus status = shm::AgentStatus::NoDevice;
-    std::string device_name;
-    std::string detail;  // e.g. "1920x1080 @ 30 fps, 11.8 Mbps"
-    std::vector<proto::Camera> cameras;
-    int selected_camera = -1;
-    bool mirror = false;
-    uint16_t rotation = 0;
-    bool status_card = false;  // show the status card instead of black while not live
-    proto::Quality quality = proto::Quality::Auto;
-    uint32_t width = 0, height = 0, fps = 0;  // format being streamed (0 when idle)
-    int thermal = -1;   // iPhone thermal state 0 nominal .. 3 critical, -1 unknown
-    int battery = -1;   // iPhone battery percent, -1 unknown
-    bool charging = false;
-};
 
 class Engine {
 public:

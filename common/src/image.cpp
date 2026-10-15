@@ -168,8 +168,13 @@ bool SaveBmp(const Nv12View& f, const char* path) {
     hdr[26] = 1;
     hdr[28] = 24;
     put32(34, img);
+#ifdef _WIN32
     FILE* fp = nullptr;
     if (fopen_s(&fp, path, "wb") != 0 || !fp) return false;
+#else
+    FILE* fp = fopen(path, "wb");
+    if (!fp) return false;
+#endif
     fwrite(hdr, 1, sizeof(hdr), fp);
     std::vector<uint8_t> line(row, 0);
     for (int32_t y = int32_t(f.height) - 1; y >= 0; --y) {  // BMP rows are bottom-up

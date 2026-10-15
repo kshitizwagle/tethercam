@@ -30,8 +30,9 @@ std::optional<plist::Value> ReadPacket(net::Socket& s) {
 }
 
 net::Socket OpenService() {
-    auto [host, port] = ServiceAddress();
-    return net::ConnectTcp(host, port, 2000);
+    const ServiceAddr addr = ServiceAddress();
+    if (!addr.unix_path.empty()) return net::ConnectUnix(addr.unix_path);
+    return net::ConnectTcp(addr.host, addr.port, 2000);
 }
 
 Device ParseDevice(const plist::Value& entry) {
@@ -85,20 +86,40 @@ std::optional<Event> ParseEvent(const plist::Value& msg) {
     return ev;
 }
 
-std::pair<std::string, uint16_t> ServiceAddress() {
+std::optional<ServiceAddr> ParseServiceAddress(std::string_view v) {
+    ServiceAddr a;
+    if (v.starts_with("UNIX:")) {
+        a.unix_path = std::string(v.substr(5));
+        if (a.unix_path.empty()) return std::nullopt;
+        return a;
+    }
+    const auto colon = v.rfind(':');
+    if (colon == std::string_view::npos || colon == 0) return std::nullopt;
+    const int port = std::atoi(std::string(v.substr(colon + 1)).c_str());
+    if (port <= 0 || port > 65535) return std::nullopt;
+    a.host = std::string(v.substr(0, colon));
+    a.port = static_cast<uint16_t>(port);
+    return a;
+}
+
+ServiceAddr ServiceAddress() {
+    std::string value;
+#ifdef _WIN32
     char* env = nullptr;
     size_t len = 0;
-    std::pair<std::string, uint16_t> result{"127.0.0.1", kDefaultPort};
     if (_dupenv_s(&env, &len, "USBMUXD_SOCKET_ADDRESS") == 0 && env) {
-        std::string_view v(env);
-        auto colon = v.rfind(':');
-        if (colon != std::string_view::npos) {
-            result.first = std::string(v.substr(0, colon));
-            result.second = static_cast<uint16_t>(std::atoi(std::string(v.substr(colon + 1)).c_str()));
-        }
+        value = env;
         free(env);
     }
-    return result;
+#else
+    if (const char* env = std::getenv("USBMUXD_SOCKET_ADDRESS")) value = env;
+#endif
+    if (auto parsed = ParseServiceAddress(value)) return *parsed;
+#ifdef _WIN32
+    return {.unix_path = {}, .host = "127.0.0.1", .port = kDefaultPort};
+#else
+    return {.unix_path = kDefaultUnixPath, .host = {}, .port = 0};
+#endif
 }
 
 std::optional<std::vector<Device>> Client::ListDevices() {

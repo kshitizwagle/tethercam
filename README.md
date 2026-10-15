@@ -1,6 +1,6 @@
 # Tethercam
 
-**Use your iPhone as a webcam on Windows 11, over a USB cable, at up to 4K. Free and open source.**
+**Use your iPhone as a webcam on Windows 11 or Linux, over a USB cable, at up to 4K. Free and open source.**
 
 **[Project page →](https://kshitizwagle.com.np/projects/tethercam)**
 
@@ -23,6 +23,10 @@ the app, pick **Tethercam (Windows Virtual Camera)**.
 3. Plug in the iPhone, tap **Trust**, open Tethercam, and choose
    **Tethercam (Windows Virtual Camera)** in your app.
 
+**Linux (beta):** install `v4l2loopback-dkms` and `usbmuxd`, then the `.deb` for your Ubuntu release or
+the `.rpm` for Fedora from [Releases](https://github.com/kshitizwagle/tethercam/releases/latest), and
+pick **Tethercam** in your app. See [the user guide](docs/USER_GUIDE.md#linux).
+
 Full instructions: **[User guide](docs/USER_GUIDE.md)**. Streaming and call apps:
 **[STREAMING.md](docs/STREAMING.md)**.
 
@@ -38,6 +42,8 @@ Full instructions: **[User guide](docs/USER_GUIDE.md)**. Streaming and call apps
 - Outputs black (not a message) while offline, plus a local [status API](docs/STATUS_API.md) so stream
   overlays can show their own "camera off" design
 - No network traffic: USB only, loopback only
+- Linux: a v4l2loopback camera for browsers, Zoom, OBS and others, VA-API hardware decode, tray icon,
+  the same status API (`.deb` for Ubuntu 24.04/26.04, `.rpm` for Fedora)
 
 ## How it works
 

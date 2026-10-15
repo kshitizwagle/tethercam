@@ -27,7 +27,7 @@ FetchContent_MakeAvailable(wil)
 
 option(TETHERCAM_BUILD_TESTS "Build unit tests" ON)
 
-add_subdirectory(common)
+add_subdirectory(../common common)
 add_subdirectory(media)
 add_subdirectory(agent)
 add_subdirectory(vcam)
@@ -37,5 +37,6 @@ add_subdirectory(tools/vcamcheck)
 
 if(TETHERCAM_BUILD_TESTS)
     enable_testing()
+    add_subdirectory(../common/tests common-tests)
     add_subdirectory(tests)
 endif()

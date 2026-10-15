@@ -1,7 +1,8 @@
 #pragma once
 
-// Tiny thread-safe logger: stderr, an optional file, and OutputDebugString.
+// Tiny thread-safe logger: stderr, an optional file, and OutputDebugString on Windows.
 
+#include <filesystem>
 #include <format>
 #include <string>
 #include <string_view>
@@ -10,7 +11,7 @@ namespace tethercam::log {
 
 enum class Level { Debug, Info, Warn, Error };
 
-void SetFile(const std::wstring& path);
+void SetFile(const std::filesystem::path& path);
 void SetMinLevel(Level level);
 void Write(Level level, std::string_view msg);
 

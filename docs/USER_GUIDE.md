@@ -1,6 +1,6 @@
 # Tethercam user guide
 
-Tethercam turns your iPhone into a webcam for Windows 11 over a USB cable. Video apps see it as a normal
+Tethercam turns your iPhone into a webcam for Windows 11 or Linux over a USB cable. Video apps see it as a normal
 camera called **Tethercam (Windows Virtual Camera)**. Nothing goes over Wi-Fi or the internet: the video
 travels through the cable only.
 
@@ -15,6 +15,7 @@ travels through the cable only.
 - [Uninstalling](#uninstalling)
 - [Troubleshooting](#troubleshooting)
 - [FAQ](#faq)
+- [Linux](#linux)
 
 For OBS, Streamlabs, Teams, Zoom and browser setup, see [STREAMING.md](STREAMING.md).
 
@@ -235,3 +236,67 @@ service, and the iPhone app only accepts connections from that cable.
 
 **Is it related to Camo?** No. Tethercam is an independent, clean-room, GPL-3.0 project built only on
 public Apple and Microsoft APIs.
+
+## Linux
+
+Linux support is new (beta): it has been tested end to end with the simulated phone and with
+Ubuntu 24.04, 26.04 and Fedora builds, but not yet with a real iPhone on Linux. Reports welcome.
+
+### What you need
+
+| | |
+|---|---|
+| Distro | Ubuntu 24.04 or 26.04 (`.deb`), Fedora (`.rpm`). Others: build from source ([DEVELOPMENT.md](DEVELOPMENT.md)) |
+| Virtual camera | `v4l2loopback` kernel module (`v4l2loopback-dkms` on Ubuntu; `v4l2loopback` from RPM Fusion on Fedora) |
+| iPhone USB service | `usbmuxd` (and `libimobiledevice-utils` for `idevicepair` if pairing needs help) |
+| Tray icon | KDE Plasma, or GNOME with the *AppIndicator and KStatusNotifierItem Support* extension (Ubuntu has it on by default) |
+
+### Install
+
+Ubuntu:
+
+```bash
+sudo apt install v4l2loopback-dkms usbmuxd libimobiledevice-utils
+sudo apt install ./Tethercam-<version>-ubuntu<release>-amd64.deb
+```
+
+Fedora (enable [RPM Fusion](https://rpmfusion.org/Configuration) first for v4l2loopback):
+
+```bash
+sudo dnf install v4l2loopback usbmuxd libimobiledevice-utils
+sudo dnf install ./Tethercam-<version>-fedora-x86_64.rpm
+```
+
+The package loads the module with `card_label=Tethercam exclusive_caps=1`
+(`/usr/lib/modprobe.d/tethercam.conf`) and enables the `tethercam-agent` user service for every user. Log
+out and in once, or start it now with `systemctl --user start tethercam-agent`. Then plug in the iPhone,
+tap **Trust**, open Tethercam on the phone, and choose **Tethercam** in your video app.
+
+With **Secure Boot** on, the DKMS module must be signed: during the install you're asked to set a MOK
+password; reboot and choose **Enroll MOK** on the blue screen. Until then `modprobe` fails with "Key was
+rejected by service".
+
+### How it differs from Windows
+
+- **One format for all apps.** v4l2loopback can't ask each app what it wants, so the camera has one
+  format: 1080p30 by default, or what you choose under **Capture quality** in the tray (4K30, 1080p60, ...).
+  The format changes while no app is using the camera. Output is YUYV (`--nv12` for NV12).
+- **Demand detection** works by noticing which processes have the camera open. Apps in containers that
+  hide their processes (some Snap/Flatpak setups) may not be seen; run the agent with `--always-on` then
+  (`systemctl --user edit tethercam-agent`, add `ExecStart=` and `ExecStart=/usr/bin/tethercam-agent --always-on`).
+- **Settings** are in `~/.config/tethercam/settings`, **logs** in `~/.local/state/tethercam/agent.log`.
+- The status API is the same: `http://127.0.0.1:4790`.
+
+### Troubleshooting (Linux)
+
+| Symptom | Fix |
+|---|---|
+| Tray: "No virtual camera (load v4l2loopback)" | `sudo modprobe v4l2loopback`; check `v4l2-ctl --list-devices` shows **Tethercam**. Secure Boot: see above |
+| No camera in Chrome/Chromium | The module needs `exclusive_caps=1` (set by the package). If v4l2loopback was already loaded with other options: `sudo modprobe -r v4l2loopback && sudo modprobe v4l2loopback` |
+| Using OBS's virtual camera too | Give v4l2loopback two devices in `/etc/modprobe.d/`: `options v4l2loopback devices=2 card_label=Tethercam,OBS exclusive_caps=1,1` |
+| "Waiting for iPhone" with the phone plugged in | Unlock it and tap **Trust**. Check `idevice_id -l` lists it; if not, `idevicepair pair`. `systemctl status usbmuxd` should be active while the phone is connected |
+| Black picture | The phone isn't streaming yet: check the tray status. If the app isn't detected as using the camera, try `--always-on` (above) |
+| "software decode" in the tray detail | VA-API isn't available: install your GPU's VA driver (`va-driver-all` on Ubuntu, `mesa-va-drivers`/`intel-media-driver` on Fedora) |
+| `tethercam-agent is already running` | The user service is running; use `systemctl --user restart tethercam-agent` |
+
+Uninstall with `sudo apt remove tethercam` or `sudo dnf remove tethercam`.

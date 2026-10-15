@@ -4,7 +4,7 @@
 > port **4790**, `GET /events` (SSE) and the **`live`** field. Don't change or remove them. Add new
 > fields freely (consumers ignore unknown ones).
 
-The Windows agent serves the camera's state on the loopback interface so stream overlays (OBS /
+The agent (Windows and Linux alike) serves the camera's state on the loopback interface so stream overlays (OBS /
 Streamlabs browser sources) can react, for example by showing their own "camera offline" design.
 While the camera isn't live, the Tethercam virtual camera itself only outputs **black** (the text
 status card is opt-in from the tray menu), so the overlay decides what viewers see.
@@ -48,7 +48,7 @@ status card is opt-in from the tray menu), so the overlay decides what viewers s
 | `mirror`, `rotation` | Current picture options |
 | `detail` | Human-readable summary |
 | `thermal`, `battery`, `charging` | iPhone thermal state (0 nominal, 1 fair, 2 serious, 3 critical; -1 unknown), battery percent (-1 unknown), charging. Updated every 2 s while live |
-| `version` | Windows agent build version (the example is illustrative) |
+| `version` | Agent build version, Windows or Linux (the example is illustrative) |
 | `quality` | Selected capture preference: `Auto`, `1080p / 30 fps`, `1080p / 60 fps`, `4K / 30 fps`, `4K / 60 fps`. Actual source dimensions and measured fps remain in `width`, `height`, `fps`; older agents omit this field |
 
 ## Timing and connection behavior

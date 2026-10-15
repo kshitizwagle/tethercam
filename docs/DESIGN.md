@@ -18,23 +18,29 @@ changes shape.
 │   │   ├── Net/               Server.swift (NWListener), Session.swift (protocol state machine)
 │   │   └── Protocol/          Wire.swift (encode/decode, mirrors PROTOCOL.md)
 │   └── TethercamTests/        protocol codec + Annex-B conversion tests
+├── common/                    static lib shared by both hosts: protocol codec, plist mini, usbmux client,
+│   │                          sockets, logging, shm layout (Windows only)
+│   └── tests/                 GoogleTest (FetchContent), runs on Windows and Linux
+├── linux/                     Linux host (M9): CMake root, builds common + tests so far
 ├── windows/
-│   ├── CMakeLists.txt         top level, C++20, /W4 /permissive- /utf-8
-│   ├── common/                static lib: protocol codec, plist mini, usbmux client, shm layout, logging
+│   ├── CMakeLists.txt         top level, C++20, /W4 /permissive- /utf-8; adds ../common
 │   ├── agent/                 tethercam-agent.exe: session, decoder, scaler, shm writer, tray UI, install
 │   ├── vcam/                  tethercam-vcam.dll: activator, media source, stream, shm reader, placeholder
 │   ├── tools/tcprobe/         stream stats + .h264 dump
 │   ├── tools/fakephone/       device simulator over TCP
-│   ├── tests/                 GoogleTest (FetchContent)
+│   ├── tests/                 agent GoogleTests (Windows only)
 │   └── installer/             WiX 5 MSI
-└── .github/workflows/         ci.yml orchestrates windows.yml and ios.yml
+└── .github/workflows/         ci.yml orchestrates windows.yml, linux.yml and ios.yml
 ```
 
 ## Shared code rules
 
 - The protocol codec exists twice (Swift and C++). Both have tests built from the same golden byte vectors,
   stored in `docs/protocol-vectors/v1.txt`, so the two can't drift apart.
-- `windows/common` must not depend on Media Foundation or COM, so it can be unit-tested anywhere.
+- `common` must not depend on Media Foundation or COM, so it can be unit-tested anywhere; Windows-only
+  code in it stays behind `#ifdef _WIN32` (sockets, logging) or is only built on Windows (`shm`).
+- usbmuxd address: `USBMUXD_SOCKET_ADDRESS` (`host:port` or `UNIX:/path`), else 127.0.0.1:27015 on
+  Windows and `/var/run/usbmuxd` on Linux.
 
 ## iOS app internals
 
@@ -133,7 +139,9 @@ stable contract and timing limits; the service does not carry video or control c
 
 **Decoder pipeline (`media/src/media.cpp`):**
 
-1. D3D11 device (`D3D11_CREATE_DEVICE_VIDEO_SUPPORT`) + `IMFDXGIDeviceManager`; falls back to software
+1. D3D11 device (`D3D11_CREATE_DEVICE_VIDEO_SUPPORT`) on the first adapter from
+   `EnumAdapterByGpuPreference(HIGH_PERFORMANCE)` (dGPU, then iGPU) that offers the H.264 VLD decoder
+   profile, + `IMFDXGIDeviceManager`; falls back to software
    decoding if the MFT isn't D3D11-aware or the device can't be created.
 2. Microsoft H.264 decoder MFT, `CODECAPI_AVLowLatencyMode`, input `MFVideoFormat_H264`, output `NV12`.
 3. Each access unit becomes one `IMFSample`; the parameter sets from `VideoConfig` are prepended to IDRs.
@@ -144,9 +152,34 @@ stable contract and timing limits; the service does not carry video or control c
    Video Processor path is a later optimization (TECH_SPEC R7).
 7. `shm::WriteFrame` copies row by row into the next slot.
 
+## Linux agent internals
+
+`linux/agent` (TECH_SPEC §13). One process, no shared memory and no second component:
+
+- `engine.cpp`: same session loop as the Windows engine (Hello/Caps/SetCamera/SetFormat/Start, heartbeat,
+  reconnect, lens/quality persistence). Differences: frames go straight to `V4l2Output`; the consumer
+  signal is `CountOtherOpeners(device) > 0` (scanned every 500 ms) or `--always-on`; the output format is
+  fixed by the quality setting (Auto = 1080p30) and only changes while no app has the device open; black
+  frames go out every 100 ms whenever no decoded frame did, so readers never stall.
+- `decoder.cpp`: FFmpeg `h264` with a hardware device (`get_format` picks `AV_PIX_FMT_VAAPI`/`CUDA`),
+  frames downloaded with `av_hwframe_transfer_data` to NV12; software output (YUV420P) is interleaved to
+  NV12. GPUs are tried discrete first, then integrated (sysfs: NVIDIA is always discrete, amdgpu hides
+  `mem_info_vram_vendor` on APUs, Intel's iGPU is `0000:00:02.0`); NVIDIA gets NVDEC before VA-API.
+  `TETHERCAM_HW_DEVICE=/dev/dri/renderDN` goes first. A device that can't open, outputs software frames
+  (no H.264 hwaccel) or fails a download is skipped for the rest of the run and the next one is tried,
+  software last. `LOW_DELAY`, slice threads only.
+- `v4l2_output.cpp`: finds the device labelled "Tethercam" (else the first v4l2loopback device, detected
+  by its `max_openers` sysfs attribute), `VIDIOC_S_FMT` on the OUTPUT queue (YUYV default, NV12 with
+  `--nv12`, BT.601 limited), letterbox-scales with `image::ScaleLetterbox` and `write()`s whole frames.
+- `settings.cpp`: `key=value` file, written atomically (temp + rename). Same keys as the Windows registry.
+- `tray.cpp`: AyatanaAppIndicator menu rebuilt on the GTK thread (`g_idle_add`) when the status changes;
+  optional at build time (`TETHERCAM_TRAY`). `main.cpp` takes a per-user `flock` in `$XDG_RUNTIME_DIR`
+  so the systemd user service and a manual start can't both run.
+- `encoder.cpp`: libx264/OpenH264 encoder used only by `fakephone` on Linux.
+
 ## Shared memory layout
 
-Defined in `windows/common/include/tethercam/shm.h`. Little-endian, naturally aligned, version 1:
+Defined in `common/include/tethercam/shm.h`. Little-endian, naturally aligned, version 1:
 
 ```c
 struct Header {                  // offset 0, 4096 bytes reserved
@@ -246,8 +279,8 @@ shows black by default, or the placeholder for `agent_status` when `placeholder_
 
 | Level | What | Where |
 |---|---|---|
-| Unit | Protocol codec (golden vectors), plist writer/reader, usbmux packet framing, Annex-B conversion, format chooser, shm seqlock | `windows/tests`, `ios/TethercamTests` |
-| Fuzz-ish | Random/truncated frames into the protocol parser and plist reader (no crashes, bounded allocations) | `windows/tests` |
+| Unit | Protocol codec (golden vectors), plist writer/reader, usbmux packet framing, Annex-B conversion, format chooser, shm seqlock | `common/tests`, `windows/tests`, `ios/TethercamTests` |
+| Fuzz-ish | Random/truncated frames into the protocol parser and plist reader (no crashes, bounded allocations) | `common/tests` |
 | Integration (no phone) | `fakephone` → agent over TCP (`--tcp 127.0.0.1:5321`) → shm → vcam → Windows Camera app | Manual + scripted with `tcprobe` |
 | Device | Real iPhone over USB: formats, lens switching, hot-plug, lock/unlock, thermals | Manual checklist in MILESTONES exit criteria |
 | Compatibility | Camera app, Teams, Zoom, OBS, Chrome, Edge × 720p/1080p/4K | Matrix in `docs/compat.md` (created in M4) |

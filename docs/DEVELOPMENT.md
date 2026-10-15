@@ -7,12 +7,14 @@ and [DESIGN.md](DESIGN.md). Wire protocol: [PROTOCOL.md](PROTOCOL.md).
 
 | Path | What |
 |---|---|
-| `windows/common` | Platform-neutral C++: protocol codec, plist, usbmux client, sockets, shared-memory layout, image helpers, formats |
+| `common` | Platform-neutral C++ shared by the Windows and Linux hosts: protocol codec, plist, usbmux client, sockets, image helpers, formats; shared-memory layout (Windows only) |
+| `common/tests` | GoogleTest unit tests for `common` (run on Windows and Linux) |
 | `windows/media` | Media Foundation: H.264 decoder (hardware), encoder (for fakephone), placeholder renderer |
 | `windows/vcam` | `tethercam-vcam.dll`, the Frame Server media source |
 | `windows/agent` | `tethercam-agent.exe`: engine, tray, Direct2D window, status API, installer actions |
 | `windows/tools` | `tcprobe`, `fakephone`, `vcamcheck` |
-| `windows/tests` | GoogleTest unit tests |
+| `windows/tests` | GoogleTest agent tests (Windows only) |
+| `linux` | Linux host: `agent/` (engine, FFmpeg decode/encode, v4l2loopback output, tray, settings), `tests/`, `packaging/` (systemd user unit, modprobe config, maintainer scripts) |
 | `windows/installer` | WiX 5 MSI |
 | `ios/` | iPhone app (Swift, XcodeGen) |
 | `altstore/` | AltStore source and icon (updated by CI) |
@@ -38,6 +40,30 @@ MSI (WiX 5: `dotnet tool install --global wix --version 5.0.2`):
 ```
 
 The version is stamped at configure time: `-DTETHERCAM_BUILD_VERSION=1.2.3` (CI does this).
+
+## Linux build
+
+GCC 13+ or Clang 17+, CMake 3.28+, FFmpeg and (optional, for the tray) GTK 3 + AyatanaAppIndicator:
+
+```bash
+sudo apt install cmake g++ pkg-config libavcodec-dev libavutil-dev libgtk-3-dev libayatana-appindicator3-dev
+cd linux
+cmake --preset linux && cmake --build --preset debug && ctest --preset debug
+```
+
+Fedora: `sudo dnf install cmake gcc-c++ ffmpeg-free-devel gtk3-devel libayatana-appindicator-gtk3-devel`.
+Packages: configure a Release build, then `cpack -G DEB` or `cpack -G RPM` in the build directory
+(`-DTETHERCAM_PACKAGE_TARGET=ubuntu24.04` names the file). Without a phone:
+
+```bash
+sudo modprobe v4l2loopback card_label=Tethercam exclusive_caps=1
+build/linux/agent/fakephone --port 5321 &
+build/linux/agent/tethercam-agent --tcp 127.0.0.1:5321
+v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=60     # any reader starts the stream
+```
+
+`fakephone` builds on Linux from `windows/tools/fakephone/main.cpp` with the FFmpeg encoder (libx264, or
+OpenH264 on Fedora's ffmpeg-free).
 
 ## iPhone build
 
@@ -93,6 +119,9 @@ Agent switches: `--console` (log to console, no tray), `--preview` (open the win
 
 - `ctest --preset debug`: protocol (golden vectors + fuzzing), plist, usbmux, formats, shared memory
   (concurrent seqlock), Annex-B, image conversion, version.
+- Linux: `ctest --preset debug` in `linux/` runs the shared tests above (minus shared memory) plus
+  `tcam_linux_tests` (settings, opener detection). The status API JSON contract is tested in
+  `common/tests/agent_state_test.cpp` on both platforms.
 - iOS `WireTests` (macOS CI): the same golden vectors in Swift.
 - `tcam_agent_tests`: real agent-loop quality negotiation, live changes and reconnect behavior over
   a loopback test peer; disables settings persistence and shared memory to isolate the user's camera.
@@ -100,9 +129,10 @@ Agent switches: `--console` (log to console, no tray), `--preview` (open the win
 
 ## CI and releases
 
-`.github/workflows/ci.yml` builds Windows (tests, Release, MSI) and iOS (simulator tests, unsigned
-ad-hoc-signed IPA) on every push. When both pass on `main`, it tags the next `vX.Y.Z` (patch by default;
-`[minor]` / `[major]` in the commit message), publishes the MSI, IPA and `SHA256SUMS.txt` as the
+`.github/workflows/ci.yml` builds Windows (tests, Release, MSI), Linux (`linux.yml`: tests and a `.deb`
+or `.rpm` per target in Ubuntu 24.04, Ubuntu 26.04 and Fedora containers) and iOS (simulator tests, unsigned
+ad-hoc-signed IPA) on every push. When all pass on `main`, it tags the next `vX.Y.Z` (patch by default;
+`[minor]` / `[major]` in the commit message), publishes the MSI, Linux packages, IPA and `SHA256SUMS.txt` as the
 **latest** release, and adds the IPA to `altstore/source.json` (commit with `[skip ci]`). Pushes that
 only touch docs (`**.md`, `docs/**`, `LICENSE`, `altstore/**`) don't build.
 

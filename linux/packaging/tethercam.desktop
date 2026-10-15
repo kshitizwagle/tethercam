@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Tethercam
+Comment=Use your iPhone as a webcam over USB
+Exec=systemctl --user start tethercam-agent.service
+Icon=tethercam
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=webcam;camera;iphone;

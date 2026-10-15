@@ -3,6 +3,7 @@
 #include <codecapi.h>
 #include <d3d11.h>
 #include <d3d10.h>
+#include <dxgi1_6.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -78,13 +79,55 @@ struct H264Decoder::Impl {
     uint32_t display_width = 0, display_height = 0;
     LONG default_stride = 0;
 
-    bool SetupD3D() {
+    // A D3D11 device on `adapter` (nullptr = the default one) that can decode H.264 in hardware.
+    static wil::com_ptr<ID3D11Device> CreateDecodeDevice(IDXGIAdapter* adapter) {
         UINT flags = D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT;
         static const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
                                                    D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
-        if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels, ARRAYSIZE(levels),
-                                     D3D11_SDK_VERSION, &device, nullptr, nullptr)))
-            return false;
+        wil::com_ptr<ID3D11Device> dev;
+        if (FAILED(D3D11CreateDevice(adapter, adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                                     flags, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, &dev, nullptr, nullptr)))
+            return nullptr;
+        auto video = dev.try_query<ID3D11VideoDevice>();
+        if (!video) return nullptr;
+        for (UINT i = 0, n = video->GetVideoDecoderProfileCount(); i < n; ++i) {
+            GUID profile{};
+            if (SUCCEEDED(video->GetVideoDecoderProfile(i, &profile)) && profile == D3D11_DECODER_PROFILE_H264_VLD_NOFGT)
+                return dev;
+        }
+        return nullptr;
+    }
+
+    // Prefers the high-performance (discrete) GPU and falls back to the next one (integrated) when it
+    // can't decode H.264; the default adapter on systems without IDXGIFactory6.
+    bool CreateDevice() {
+        wil::com_ptr<IDXGIFactory1> factory;
+        if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+            if (auto f6 = factory.try_query<IDXGIFactory6>()) {
+                wil::com_ptr<IDXGIAdapter1> adapter;
+                for (UINT i = 0; SUCCEEDED(f6->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                                                                          IID_PPV_ARGS(adapter.put())));
+                     ++i) {
+                    DXGI_ADAPTER_DESC1 desc{};
+                    adapter->GetDesc1(&desc);
+                    if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
+                    char name[128]{};
+                    WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name) - 1, nullptr, nullptr);
+                    if ((device = CreateDecodeDevice(adapter.get()))) {
+                        log::Info("decoder GPU: {}", name);
+                        return true;
+                    }
+                    log::Info("decoder GPU: {} has no H.264 hardware decode, trying the next one", name);
+                }
+                return false;
+            }
+        }
+        device = CreateDecodeDevice(nullptr);
+        return device != nullptr;
+    }
+
+    bool SetupD3D() {
+        if (!CreateDevice()) return false;
         if (auto mt = device.try_query<ID3D10Multithread>()) mt->SetMultithreadProtected(TRUE);
         UINT token = 0;
         if (FAILED(MFCreateDXGIDeviceManager(&token, &manager))) return false;

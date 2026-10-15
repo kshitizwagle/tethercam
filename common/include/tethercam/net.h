@@ -1,9 +1,15 @@
 #pragma once
 
-// Small blocking Winsock helpers shared by the agent and tools.
+// Small blocking socket helpers shared by the agent and tools (Winsock on Windows, BSD sockets elsewhere).
 
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 
 #include <cstdint>
 #include <span>
@@ -12,18 +18,26 @@
 
 namespace tethercam::net {
 
-// Calls WSAStartup once per process.
+#ifdef _WIN32
+using SocketHandle = SOCKET;
+inline constexpr SocketHandle kInvalidSocket = kInvalidSocket;
+#else
+using SocketHandle = int;
+inline constexpr SocketHandle kInvalidSocket = -1;
+#endif
+
+// Calls WSAStartup once per process on Windows; ignores SIGPIPE elsewhere.
 bool Init();
 
 class Socket {
 public:
     Socket() = default;
-    explicit Socket(SOCKET s) : s_(s) {}
-    Socket(Socket&& o) noexcept : s_(std::exchange(o.s_, INVALID_SOCKET)) {}
+    explicit Socket(SocketHandle s) : s_(s) {}
+    Socket(Socket&& o) noexcept : s_(std::exchange(o.s_, kInvalidSocket)) {}
     Socket& operator=(Socket&& o) noexcept {
         if (this != &o) {
             Close();
-            s_ = std::exchange(o.s_, INVALID_SOCKET);
+            s_ = std::exchange(o.s_, kInvalidSocket);
         }
         return *this;
     }
@@ -31,8 +45,8 @@ public:
     Socket& operator=(const Socket&) = delete;
     ~Socket() { Close(); }
 
-    bool Valid() const { return s_ != INVALID_SOCKET; }
-    SOCKET Get() const { return s_; }
+    bool Valid() const { return s_ != kInvalidSocket; }
+    SocketHandle Get() const { return s_; }
     void Close();
     // Wakes up a thread blocked in recv on this socket.
     void Shutdown();
@@ -48,7 +62,7 @@ public:
     void SetRecvBuffer(int bytes);
 
 private:
-    SOCKET s_ = INVALID_SOCKET;
+    SocketHandle s_ = kInvalidSocket;
 };
 
 // Connects to host:port over TCP (IPv4/IPv6). Invalid socket on failure.
@@ -56,5 +70,7 @@ Socket ConnectTcp(const std::string& host, uint16_t port, int timeout_ms = 3000)
 // Listens on host:port. Invalid socket on failure.
 Socket ListenTcp(const std::string& host, uint16_t port);
 Socket Accept(Socket& listener);
+// Connects to a Unix domain socket (usbmuxd on Linux/macOS). Invalid socket on failure or on Windows.
+Socket ConnectUnix(const std::string& path);
 
 }  // namespace tethercam::net

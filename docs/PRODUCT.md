@@ -11,13 +11,14 @@ Using a phone you already own as a camera should be a basic, free feature.
 
 ## Product statement
 
-Tethercam turns an iPhone into a standard Windows webcam over a USB cable, at the highest video
+Tethercam turns an iPhone into a standard Windows or Linux webcam over a USB cable, at the highest video
 resolution the phone can stream, with as little setup and UI as possible. It's free and GPL-3.0.
 
 ## Users
 
 - **Remote workers** on Windows who want a better picture in Teams, Zoom or Meet.
 - **Streamers and creators** who want a 1080p60 or 4K source in OBS without buying a camera.
+- **Linux desktop users**, who have even fewer options than Windows users.
 - **Tinkerers and open-source contributors** who want a transparent tool with no telemetry.
 
 ## Goals (v1)

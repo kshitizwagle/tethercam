@@ -11,6 +11,8 @@
 #include <cstring>
 #include <span>
 
+#include "tethercam/agent_state.h"
+
 namespace tethercam::shm {
 
 // Object names live in the Global\ namespace (the service is in session 0). For development
@@ -34,16 +36,7 @@ constexpr uint64_t AlignUp(uint64_t v, uint64_t a) { return (v + a - 1) / a * a;
 inline constexpr uint64_t kSlotCapacity = AlignUp(kSlotHeaderBytes + uint64_t(kMaxWidth) * kMaxHeight * 3 / 2, 4096);
 inline constexpr uint64_t kMappingBytes = kHeaderBytes + kSlotCapacity * kSlotCount;
 
-// Agent state, shown on the placeholder frame.
-enum class AgentStatus : uint32_t {
-    None = 0,            // no agent running
-    NoDevice = 1,        // waiting for an iPhone on USB
-    AppNotOpen = 2,      // iPhone attached, Tethercam app not open / not trusted
-    Connected = 3,       // connected, not streaming yet
-    Streaming = 4,
-    PausedOnPhone = 5,   // app backgrounded or screen locked
-    NoUsbmuxd = 6,       // Apple Devices / iTunes missing
-};
+// AgentStatus (agent_status values in the header below) lives in agent_state.h.
 
 struct Header {
     uint32_t magic;

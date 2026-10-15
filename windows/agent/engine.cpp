@@ -20,19 +20,6 @@ using Clock = std::chrono::steady_clock;
 constexpr auto kSilenceTimeout = std::chrono::seconds(3);
 constexpr auto kConsumerGrace = std::chrono::seconds(2);
 
-const char* StatusName(shm::AgentStatus s) {
-    switch (s) {
-    case shm::AgentStatus::None: return "none";
-    case shm::AgentStatus::NoDevice: return "waiting for iPhone";
-    case shm::AgentStatus::AppNotOpen: return "iPhone found, app not open";
-    case shm::AgentStatus::Connected: return "connected";
-    case shm::AgentStatus::Streaming: return "streaming";
-    case shm::AgentStatus::PausedOnPhone: return "paused on iPhone";
-    case shm::AgentStatus::NoUsbmuxd: return "Apple Devices not installed";
-    }
-    return "?";
-}
-
 // User choices that survive reconnects and restarts: HKCU\Software\Tethercam.
 constexpr wchar_t kSettingsKey[] = L"Software\\Tethercam";
 
@@ -156,45 +143,9 @@ void Engine::SetStatusCard(bool on) {
     Notify();
 }
 
-namespace {
-std::string JsonEscape(const std::string& s) {
-    std::string out;
-    for (char c : s) {
-        if (c == '"' || c == '\\') out += '\\', out += c;
-        else if (static_cast<unsigned char>(c) < 0x20) out += std::format("\\u{:04x}", int(c));
-        else out += c;
-    }
-    return out;
-}
-
-const char* StateName(shm::AgentStatus s) {
-    switch (s) {
-    case shm::AgentStatus::Streaming: return "live";
-    case shm::AgentStatus::Connected: return "connected";
-    case shm::AgentStatus::NoDevice: return "no_iphone";
-    case shm::AgentStatus::AppNotOpen: return "app_not_open";
-    case shm::AgentStatus::PausedOnPhone: return "paused";
-    case shm::AgentStatus::NoUsbmuxd: return "no_apple_driver";
-    default: return "starting";
-    }
-}
-}  // namespace
-
 std::string Engine::StatusJson() const {
     std::lock_guard lock(mu_);
-    std::string camera, lens;
-    for (const auto& c : snap_.cameras) {
-        if (c.camera_id != snap_.selected_camera) continue;
-        camera = c.label;
-        lens = c.position == proto::Position::Front ? "front" : c.lens == proto::Lens::UltraWide ? "ultra_wide"
-               : c.lens == proto::Lens::Telephoto ? "telephoto" : "wide";
-    }
-    const bool live = snap_.status == shm::AgentStatus::Streaming && snap_.fps > 0;
-    return std::format(
-        R"({{"state":"{}","live":{},"device":"{}","camera":"{}","lens":"{}","width":{},"height":{},"fps":{},"mirror":{},"rotation":{},"detail":"{}","thermal":{},"battery":{},"charging":{},"version":"{}","quality":"{}"}})",
-        StateName(snap_.status), live ? "true" : "false", JsonEscape(snap_.device_name), JsonEscape(camera), lens,
-        snap_.width, snap_.height, snap_.fps, snap_.mirror ? "true" : "false", snap_.rotation,
-        JsonEscape(snap_.detail), snap_.thermal, snap_.battery, snap_.charging ? "true" : "false", Version(), QualityLabel(snap_.quality));
+    return agent::StatusJson(snap_);
 }
 
 bool Engine::CopyPreview(image::Nv12Frame& out, uint64_t& seq) const {

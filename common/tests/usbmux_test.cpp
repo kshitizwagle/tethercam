@@ -151,3 +151,26 @@ TEST(Formats, BitrateTableAnchors) {
     EXPECT_GT(DefaultBitrateKbps(3840, 2160, 60), 60000u);
     EXPECT_LE(DefaultBitrateKbps(3840, 2160, 60), 80000u);
 }
+
+TEST(Usbmux, ParsesTcpServiceAddress) {
+    auto a = usbmux::ParseServiceAddress("127.0.0.1:27015");
+    ASSERT_TRUE(a);
+    EXPECT_TRUE(a->unix_path.empty());
+    EXPECT_EQ(a->host, "127.0.0.1");
+    EXPECT_EQ(a->port, 27015);
+}
+
+TEST(Usbmux, ParsesUnixServiceAddress) {
+    auto a = usbmux::ParseServiceAddress("UNIX:/var/run/usbmuxd");
+    ASSERT_TRUE(a);
+    EXPECT_EQ(a->unix_path, "/var/run/usbmuxd");
+}
+
+TEST(Usbmux, RejectsBadServiceAddress) {
+    EXPECT_FALSE(usbmux::ParseServiceAddress(""));
+    EXPECT_FALSE(usbmux::ParseServiceAddress("UNIX:"));
+    EXPECT_FALSE(usbmux::ParseServiceAddress("localhost"));
+    EXPECT_FALSE(usbmux::ParseServiceAddress(":27015"));
+    EXPECT_FALSE(usbmux::ParseServiceAddress("localhost:0"));
+    EXPECT_FALSE(usbmux::ParseServiceAddress("localhost:70000"));
+}

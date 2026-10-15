@@ -1,6 +1,6 @@
 # Tethercam: notes for coding sessions
 
-Tethercam makes an iPhone a Windows 11 webcam over USB, at full video resolution. Video only, wired only,
+Tethercam makes an iPhone a Windows 11 or Linux webcam over USB, at full video resolution. Video only, wired only,
 no overlays. GPL-3.0.
 
 ## Start of every session
@@ -28,8 +28,8 @@ no overlays. GPL-3.0.
   (`C:\Users\Admin\dev\streaming`, see its CLAUDE.md: both canvases, locked items, hidden partners).
 - **Clean room:** never decompile, trace or copy Camo or any other commercial webcam app. Use public
   Apple/Microsoft docs and permissively licensed references only (see CONTRIBUTING.md).
-- Windows: C++20, CMake, MSVC, WIL for RAII, no exceptions across COM boundaries. `windows/common` stays
-  free of COM/MF so it can be unit-tested.
+- Windows: C++20, CMake, MSVC, WIL for RAII, no exceptions across COM boundaries. `common/` (shared with
+  the Linux host) stays free of COM/MF so it can be unit-tested on both.
 - iOS: Swift 5 mode + strict-concurrency warnings, XcodeGen (`ios/project.yml`); never commit the generated `.xcodeproj`.
 - The vcam DLL runs inside the FrameServer service as LocalService. It must not block, throw, write files,
   or trust shared-memory contents without validating them.
@@ -51,4 +51,7 @@ cmake --preset vs2026-x64
 cmake --build --preset debug
 ctest --preset debug
 ```
+Linux: `cd linux && cmake --preset linux && cmake --build --preset debug && ctest --preset debug`
+(needs libavcodec-dev, libavutil-dev; tray: libgtk-3-dev, libayatana-appindicator3-dev). On Linux, test with
+`fakephone --port 5321` + `tethercam-agent --tcp 127.0.0.1:5321` and any reader of the v4l2loopback device.
 iOS (on a Mac): `cd ios && xcodegen && xcodebuild -scheme Tethercam -destination 'generic/platform=iOS' build`

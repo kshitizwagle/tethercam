@@ -63,6 +63,11 @@ build-from-source instructions.
 Audio as a virtual microphone, HEVC option, Windows 10 DirectShow fallback, focus/exposure controls,
 shared D3D11 textures instead of CPU copies, ARM64 build, choosing between several phones.
 
+### Phase 9: Linux host (M9)
+Move the core to `common/` and make it portable; Linux agent (usbmuxd socket, FFmpeg decode,
+v4l2loopback output, Status API, SNI tray, systemd user unit); `.deb`/`.rpm` from CI; Linux CI job.
+See TECH_SPEC §13.
+
 ## Session workflow (many sessions over several weeks)
 
 1. Read [CLAUDE.md](../CLAUDE.md), then the current milestone in MILESTONES.md and the top of TODO.md.

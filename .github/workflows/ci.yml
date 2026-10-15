@@ -1,6 +1,6 @@
 name: ci
 
-# Builds and tests Windows and iOS on every push and pull request. When both pass on main, the next
+# Builds and tests Windows, Linux and iOS on every push and pull request. When both pass on main, the next
 # vX.Y.Z tag is created on that commit and the MSI and IPA from this run are published as its release.
 # Pushes that only touch docs don't build, so they never make a release.
 
@@ -58,6 +58,12 @@ jobs:
     with:
       version: ${{ needs.version.outputs.version }}
 
+  linux:
+    needs: version
+    uses: ./.github/workflows/linux.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
   ios:
     needs: version
     uses: ./.github/workflows/ios.yml
@@ -65,7 +71,7 @@ jobs:
       version: ${{ needs.version.outputs.version }}
 
   release:
-    needs: [version, windows, ios]
+    needs: [version, windows, linux, ios]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -81,6 +87,7 @@ jobs:
         run: |
           mkdir out
           cp dist/tethercam-windows/Tethercam-*.msi out/
+          cp dist/tethercam-linux-*/Tethercam-* out/
           cp dist/tethercam-ios/Tethercam-unsigned.ipa out/
           cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Tag and publish release
@@ -92,7 +99,7 @@ jobs:
           # Every green main build is published as the latest release.
           gh release create "v$VERSION" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
             --title "Tethercam v$VERSION" --generate-notes \
-            --notes "Windows: install the MSI (needs Windows 11 and the Apple Devices app). iPhone: add the AltStore source https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/altstore/source.json, or sideload Tethercam-unsigned.ipa with Sideloadly/AltStore (signs it with your Apple ID). See README for details."
+            --notes "Windows: install the MSI (needs Windows 11 and the Apple Devices app). Linux: install the .deb for your Ubuntu release or the .rpm for Fedora (needs v4l2loopback; see docs/USER_GUIDE.md). iPhone: add the AltStore source https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/altstore/source.json, or sideload Tethercam-unsigned.ipa with Sideloadly/AltStore (signs it with your Apple ID). See README for details."
       - name: Add the release to the AltStore source
         # Commits to main with [skip ci]; altstore/** is also in paths-ignore above.
         env:
