@@ -4,6 +4,7 @@
 
 #include <avrt.h>
 #include <mfapi.h>
+#include <mfidl.h>  // MFGetSystemTime lives here, not in mfapi.h
 
 #include <chrono>
 #include <cstdlib>

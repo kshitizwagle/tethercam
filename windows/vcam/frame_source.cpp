@@ -117,7 +117,7 @@ const image::Nv12Frame& FrameSource::Placeholder(shm::AgentStatus status) {
     return placeholder_;
 }
 
-FillResult FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pitch, uint32_t grace_ms) {
+FrameSource::FillResult FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pitch, uint32_t grace_ms) {
     std::lock_guard lock(mu_);
     FillResult out;
     if (width_ == 0) return out;
