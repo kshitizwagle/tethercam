@@ -3,25 +3,10 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 
 namespace tethercam::image {
 namespace {
-
-struct Rect {
-    uint32_t x, y, w, h;
-};
-
-// Largest rect with src's aspect ratio centered in dst, with even coordinates for NV12.
-Rect FitRect(uint32_t sw, uint32_t sh, uint32_t dw, uint32_t dh) {
-    uint32_t w = dw, h = static_cast<uint32_t>(uint64_t(dw) * sh / sw);
-    if (h > dh) {
-        h = dh;
-        w = static_cast<uint32_t>(uint64_t(dh) * sw / sh);
-    }
-    w &= ~1u;
-    h &= ~1u;
-    return {((dw - w) / 2) & ~1u, ((dh - h) / 2) & ~1u, std::max(w, 2u), std::max(h, 2u)};
-}
 
 // Bilinear resample of one plane with `ch` interleaved channels.
 void ResamplePlane(const uint8_t* src, uint32_t spitch, uint32_t sw, uint32_t sh, uint8_t* dst, uint32_t dpitch,
@@ -41,31 +26,60 @@ void ResamplePlane(const uint8_t* src, uint32_t spitch, uint32_t sw, uint32_t sh
         x0[x] = int32_t(sx >> 16);
         fx[x] = int32_t(sx & 0xFFFF) >> 8;
     }
-    for (uint32_t y = 0; y < dh; ++y) {
-        int64_t sy = (int64_t(y) * ystep) + ystep / 2 - 0x8000;
-        sy = std::clamp<int64_t>(sy, 0, (int64_t(sh - 1) << 16));
-        const uint32_t y0 = uint32_t(sy >> 16);
-        const uint32_t y1 = std::min(y0 + 1, sh - 1);
-        const int32_t fy = int32_t(sy & 0xFFFF) >> 8;
-        const uint8_t* r0 = src + size_t(y0) * spitch;
-        const uint8_t* r1 = src + size_t(y1) * spitch;
-        uint8_t* out = dst + size_t(y) * dpitch;
-        for (uint32_t x = 0; x < dw; ++x) {
-            const uint32_t a = uint32_t(x0[x]);
-            const uint32_t b = std::min(a + 1, sw - 1);
-            for (int c = 0; c < ch; ++c) {
-                const int32_t p00 = r0[a * ch + c], p01 = r0[b * ch + c];
-                const int32_t p10 = r1[a * ch + c], p11 = r1[b * ch + c];
-                const int32_t top = p00 * 256 + (p01 - p00) * fx[x];
-                const int32_t bot = p10 * 256 + (p11 - p10) * fx[x];
-                const int32_t v = (top * 256 + (bot - top) * fy + (1 << 15)) >> 16;
-                out[x * ch + c] = static_cast<uint8_t>(v);
+
+    auto rows = [&](uint32_t y_begin, uint32_t y_end) {
+        for (uint32_t y = y_begin; y < y_end; ++y) {
+            int64_t sy = (int64_t(y) * ystep) + ystep / 2 - 0x8000;
+            sy = std::clamp<int64_t>(sy, 0, (int64_t(sh - 1) << 16));
+            const uint32_t y0 = uint32_t(sy >> 16);
+            const uint32_t y1 = std::min(y0 + 1, sh - 1);
+            const int32_t fy = int32_t(sy & 0xFFFF) >> 8;
+            const uint8_t* r0 = src + size_t(y0) * spitch;
+            const uint8_t* r1 = src + size_t(y1) * spitch;
+            uint8_t* out = dst + size_t(y) * dpitch;
+            for (uint32_t x = 0; x < dw; ++x) {
+                const uint32_t a = uint32_t(x0[x]);
+                const uint32_t b = std::min(a + 1, sw - 1);
+                for (int c = 0; c < ch; ++c) {
+                    const int32_t p00 = r0[a * ch + c], p01 = r0[b * ch + c];
+                    const int32_t p10 = r1[a * ch + c], p11 = r1[b * ch + c];
+                    const int32_t top = p00 * 256 + (p01 - p00) * fx[x];
+                    const int32_t bot = p10 * 256 + (p11 - p10) * fx[x];
+                    const int32_t v = (top * 256 + (bot - top) * fy + (1 << 15)) >> 16;
+                    out[x * ch + c] = static_cast<uint8_t>(v);
+                }
             }
         }
+    };
+
+    // Large frames: split the rows across two threads. Resampling is the one CPU-heavy step when
+    // the phone cannot produce the requested size directly (e.g. 4K source, 1080p consumer).
+    if (uint64_t(dw) * dh >= 1'000'000 && dh >= 2 && std::thread::hardware_concurrency() > 1) {
+        const uint32_t half = (dh / 2) & ~1u;
+        if (half == 0) {
+            rows(0, dh);
+        } else {
+            std::thread worker(rows, half, dh);
+            rows(0, half);
+            worker.join();
+        }
+    } else {
+        rows(0, dh);
     }
 }
 
 }  // namespace
+
+Rect LetterboxRect(uint32_t sw, uint32_t sh, uint32_t dw, uint32_t dh) {
+    uint32_t w = dw, h = static_cast<uint32_t>(uint64_t(dw) * sh / sw);
+    if (h > dh) {
+        h = dh;
+        w = static_cast<uint32_t>(uint64_t(dh) * sw / sh);
+    }
+    w &= ~1u;
+    h &= ~1u;
+    return {((dw - w) / 2) & ~1u, ((dh - h) / 2) & ~1u, std::max(w, 2u), std::max(h, 2u)};
+}
 
 void FillBlack(Nv12Frame& f) {
     std::memset(f.Y(), 16, size_t(f.width) * f.height);
@@ -73,7 +87,7 @@ void FillBlack(Nv12Frame& f) {
 }
 
 void ScaleLetterbox(const Nv12View& src, Nv12Frame& dst, bool mirror) {
-    const Rect r = FitRect(src.width, src.height, dst.width, dst.height);
+    const Rect r = LetterboxRect(src.width, src.height, dst.width, dst.height);
     if (r.w != dst.width || r.h != dst.height) FillBlack(dst);
     uint8_t* y = dst.Y() + size_t(r.y) * dst.width + r.x;
     ResamplePlane(src.y, src.y_pitch, src.width, src.height, y, dst.width, r.w, r.h, 1, mirror);

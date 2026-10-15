@@ -2,6 +2,9 @@
 
 #include <windows.h>
 
+#include <avrt.h>
+#include <mfapi.h>
+
 #include <chrono>
 #include <cstdlib>
 #include <format>
@@ -19,6 +22,45 @@ using Clock = std::chrono::steady_clock;
 
 constexpr auto kSilenceTimeout = std::chrono::seconds(3);
 constexpr auto kConsumerGrace = std::chrono::seconds(2);
+
+// Host-clock timestamps in the Media Foundation time domain: anchored once per session, then
+// advanced with the performance counter (the millisecond wall clock is too coarse at 60 fps).
+struct HostClock {
+    LARGE_INTEGER freq{}, base_qpc{};
+    LONGLONG base_mf = 0;
+
+    void Anchor() {
+        base_mf = MFGetSystemTime();
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&base_qpc);
+    }
+    int64_t Now() const {
+        LARGE_INTEGER qpc;
+        QueryPerformanceCounter(&qpc);
+        return base_mf + (qpc.QuadPart - base_qpc.QuadPart) * 10'000'000 / freq.QuadPart;
+    }
+};
+
+// Raises the media thread for the run: on a busy machine the decode and delivery loop otherwise
+// loses its time slices to background work (the load-24 collapse before this was measurable).
+class MmcssScope {
+public:
+    MmcssScope() {
+        task_ = AvSetMmThreadCharacteristicsW(L"Capture", &index_);
+        if (task_) AvSetMmThreadPriority(task_, AVRT_PRIORITY_HIGH);
+        else SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    }
+    ~MmcssScope() {
+        if (task_) AvRevertMmThreadCharacteristics(task_);
+    }
+    MmcssScope(const MmcssScope&) = delete;
+    MmcssScope& operator=(const MmcssScope&) = delete;
+    const char* Description() const { return task_ ? "MMCSS Capture (high)" : "above-normal priority"; }
+
+private:
+    HANDLE task_ = nullptr;
+    DWORD index_ = 0;
+};
 
 // User choices that survive reconnects and restarts: HKCU\Software\Tethercam.
 constexpr wchar_t kSettingsKey[] = L"Software\\Tethercam";
@@ -242,7 +284,9 @@ bool Engine::OpenLink(net::Socket& out) {
 void Engine::Run() {
     net::Init();
     media::MfScope mf;
+    MmcssScope mmcss;
     log::Info("Tethercam agent {} started{}", Version(), opt_.tcp.empty() ? "" : " (TCP mode: " + opt_.tcp + ")");
+    log::Info("media thread: {}", mmcss.Description());
     while (!stop_) {
         TickShm();
         net::Socket sock;
@@ -285,7 +329,10 @@ void Engine::RunSession(net::Socket& sock) {
     proto::StreamParser parser;
     std::vector<uint8_t> buf(1 << 20);
     media::H264Decoder decoder;
+    media::Nv12Scaler scaler;
     bool decoder_ready = false;
+    HostClock clock;
+    clock.Anchor();
     std::vector<uint8_t> parameter_sets;
     bool waiting_for_key = true;
     image::Nv12Frame scaled;
@@ -404,6 +451,8 @@ void Engine::RunSession(net::Socket& sock) {
             } else if (auto vc = std::get_if<proto::VideoConfig>(&m)) {
                 parameter_sets = vc->parameter_sets;
                 decoder_ready = decoder.Init(vc->width, vc->height, vc->fps, opt_.prefer_hardware_decode);
+                if (decoder_ready && decoder.Device() && scaler.Init(decoder.Device()))
+                    log::Info("GPU scaling available");
                 waiting_for_key = true;
                 paused_on_phone = false;
                 device_format = {vc->width, vc->height, vc->fps};
@@ -417,29 +466,45 @@ void Engine::RunSession(net::Socket& sock) {
                 std::vector<uint8_t> au;
                 if (vf->IsKeyframe()) au = parameter_sets;
                 au.insert(au.end(), vf->data.begin(), vf->data.end());
-                const bool ok = decoder.Decode(au, int64_t(vf->pts_us * 10), [&](const image::Nv12View& v, int64_t) {
+                const bool ok = decoder.Decode(au, int64_t(vf->pts_us * 10), [&](const media::DecodedFrame& f, int64_t) {
                     if (preview_active_) {
                         // Keep a small copy for the preview window, at the source's aspect ratio.
-                        uint32_t pw = std::min<uint32_t>(1280, v.width) & ~1u;
-                        uint32_t ph = static_cast<uint32_t>(uint64_t(pw) * v.height / v.width) & ~1u;
-                        std::lock_guard lock(preview_mu_);
-                        if (preview_.width != pw || preview_.height != ph) preview_.Resize(pw, ph);
-                        image::ScaleLetterbox(v, preview_);
-                        ++preview_seq_;
+                        const image::Nv12View v = f.View();
+                        if (v.y) {
+                            uint32_t pw = std::min<uint32_t>(1280, v.width) & ~1u;
+                            uint32_t ph = static_cast<uint32_t>(uint64_t(pw) * v.height / v.width) & ~1u;
+                            std::lock_guard lock(preview_mu_);
+                            if (preview_.width != pw || preview_.height != ph) preview_.Resize(pw, ph);
+                            image::ScaleLetterbox(v, preview_);
+                            ++preview_seq_;
+                        }
                     }
                     if (!shm_open_ || target.width == 0) return;
                     ++frame_counter;
-                    if (v.width == target.width && v.height == target.height) {
-                        shm::WriteFrame(shm_.view, v.width, v.height, v.y, v.y_pitch, v.uv, v.uv_pitch,
-                                        GetTickCount64() * 10000);
-                    } else {
-                        scaled.Resize(target.width, target.height);
-                        image::ScaleLetterbox(v, scaled);
-                        const auto sv = scaled.View();
-                        shm::WriteFrame(shm_.view, sv.width, sv.height, sv.y, sv.y_pitch, sv.uv, sv.uv_pitch,
-                                        GetTickCount64() * 10000);
+                    const bool need_scale = f.display_width != target.width || f.display_height != target.height;
+                    bool wrote = false;
+                    if (need_scale && f.texture && scaler.Ok()) {
+                        // Scale on the GPU; the one download goes straight into shared memory.
+                        wrote = scaler.Scale(f, target.width, target.height, [&](const image::Nv12View& v) {
+                            return shm::WriteFrame(shm_.view, v.width, v.height, v.y, v.y_pitch, v.uv, v.uv_pitch,
+                                                   clock.Now());
+                        });
                     }
-                    SetEvent(shm_.frame_ready);
+                    if (!wrote) {
+                        const image::Nv12View v = f.View();
+                        if (!v.y) return;
+                        if (!need_scale) {
+                            wrote = shm::WriteFrame(shm_.view, v.width, v.height, v.y, v.y_pitch, v.uv, v.uv_pitch,
+                                                    clock.Now());
+                        } else {
+                            scaled.Resize(target.width, target.height);
+                            image::ScaleLetterbox(v, scaled);
+                            const auto sv = scaled.View();
+                            wrote = shm::WriteFrame(shm_.view, sv.width, sv.height, sv.y, sv.y_pitch, sv.uv, sv.uv_pitch,
+                                                    clock.Now());
+                        }
+                    }
+                    if (wrote) SetEvent(shm_.frame_ready);
                 });
                 if (!ok) {
                     log::Warn("decode error; requesting keyframe");

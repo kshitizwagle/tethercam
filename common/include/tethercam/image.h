@@ -7,6 +7,14 @@
 
 namespace tethercam::image {
 
+// A rectangle in pixels; the letterbox helpers keep x/y/w/h even for NV12.
+struct Rect {
+    uint32_t x = 0, y = 0, w = 0, h = 0;
+};
+
+// Largest rect with src's aspect ratio centered in dst, with even coordinates for NV12.
+Rect LetterboxRect(uint32_t sw, uint32_t sh, uint32_t dw, uint32_t dh);
+
 struct Nv12View {
     const uint8_t* y = nullptr;
     const uint8_t* uv = nullptr;

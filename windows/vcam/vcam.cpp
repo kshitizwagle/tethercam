@@ -7,6 +7,10 @@
 namespace tethercam::vcam {
 namespace {
 
+// How long a sample waits for a frame that is landing right now, when the newest one we have was
+// already delivered. Bounded so the Frame Server's pull thread never stalls for long.
+constexpr uint32_t kLateFrameGraceMs = 2;
+
 void Trace(const char* fmt, ...) {
     char buf[256];
     va_list args;
@@ -366,7 +370,7 @@ STDMETHODIMP MediaStream::RequestSample(IUnknown* token) {
     ComPtr<IMFMediaBuffer> buffer;
     if (FAILED(hr = sample->GetBufferByIndex(0, &buffer))) return hr;
 
-    bool live = false;
+    FrameSource::FillResult r;
     ComPtr<IMF2DBuffer2> b2;
     ComPtr<IMF2DBuffer> b1;
     if (SUCCEEDED(buffer.As(&b2))) {
@@ -376,32 +380,47 @@ STDMETHODIMP MediaStream::RequestSample(IUnknown* token) {
         DWORD len = 0;
         if (FAILED(hr = b2->Lock2DSize(MF2DBuffer_LockFlags_Write, &scan0, &pitch, &start, &len))) return hr;
         if (pitch > 0 && DWORD(pitch) * height_ * 3 / 2 <= len)
-            live = frames_.Fill(scan0, DWORD(pitch), scan0 + size_t(pitch) * height_, DWORD(pitch));
+            r = frames_.Fill(scan0, DWORD(pitch), scan0 + size_t(pitch) * height_, DWORD(pitch), kLateFrameGraceMs);
         b2->Unlock2D();
     } else if (SUCCEEDED(buffer.As(&b1))) {
         BYTE* scan0 = nullptr;
         LONG pitch = 0;
         if (FAILED(hr = b1->Lock2D(&scan0, &pitch))) return hr;
-        if (pitch > 0) live = frames_.Fill(scan0, DWORD(pitch), scan0 + size_t(pitch) * height_, DWORD(pitch));
+        if (pitch > 0)
+            r = frames_.Fill(scan0, DWORD(pitch), scan0 + size_t(pitch) * height_, DWORD(pitch), kLateFrameGraceMs);
         b1->Unlock2D();
     } else {
         BYTE* p = nullptr;
         DWORD max = 0;
         if (FAILED(hr = buffer->Lock(&p, &max, nullptr))) return hr;
-        if (max >= width_ * height_ * 3 / 2) live = frames_.Fill(p, width_, p + size_t(width_) * height_, width_);
+        if (max >= width_ * height_ * 3 / 2)
+            r = frames_.Fill(p, width_, p + size_t(width_) * height_, width_, kLateFrameGraceMs);
         buffer->Unlock();
     }
     buffer->SetCurrentLength(width_ * height_ * 3 / 2);
 
-    sample->SetSampleTime(now);
+    // Live frames carry the agent's capture clock (host time); repeats and the placeholder advance
+    // the delivery clock. A timestamp from another clock domain (an old agent) is ignored, and the
+    // timeline never steps backwards.
+    LONGLONG time = MFGetSystemTime();
+    if (r.live && r.fresh && r.pts_100ns && LONGLONG(r.pts_100ns) > last_sample_time_ - 10'000'000)
+        time = LONGLONG(r.pts_100ns);
+    if (time <= last_sample_time_) time = last_sample_time_ + 1;
+    sample->SetSampleTime(time);
     sample->SetSampleDuration(interval);
+    last_sample_time_ = time;
+    if (have_sample_ && r.live != last_live_) sample->SetUINT32(MFSampleExtension_Discontinuity, TRUE);
+    last_live_ = r.live;
+    have_sample_ = true;
+
     if (token) sample->SetUnknown(MFSampleExtension_Token, token);
     ++delivered_;
-    if (live) ++live_;
+    if (r.live) ++live_;
+    if (r.live && !r.fresh) ++repeated_;
     if (delivered_ % 300 == 1) {
-        char msg[128];
-        std::snprintf(msg, sizeof(msg), "vcam: delivered %llu samples (%llu live) at %ux%u@%u%s", delivered_, live_,
-                      width_, height_, fps_, allocator_ ? " via allocator" : "");
+        char msg[160];
+        std::snprintf(msg, sizeof(msg), "vcam: delivered %llu samples (%llu live, %llu repeat) at %ux%u@%u%s", delivered_,
+                      live_, repeated_, width_, height_, fps_, allocator_ ? " via allocator" : "");
         frames_.Report(msg);
     }
     return queue_->QueueEventParamUnk(MEMediaSample, GUID_NULL, S_OK, sample.Get());

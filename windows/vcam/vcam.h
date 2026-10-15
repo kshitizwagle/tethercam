@@ -120,7 +120,10 @@ private:
     LONGLONG next_due_ = 0;
     HANDLE timer_ = nullptr;
     FrameSource frames_;
-    uint64_t delivered_ = 0, live_ = 0;
+    uint64_t delivered_ = 0, live_ = 0, repeated_ = 0;
+    LONGLONG last_sample_time_ = 0;
+    bool last_live_ = false;  // marks live <-> placeholder edges with MFSampleExtension_Discontinuity
+    bool have_sample_ = false;
 };
 
 class MediaSource

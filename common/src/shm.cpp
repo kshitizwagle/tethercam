@@ -76,7 +76,9 @@ bool WriteFrame(void* base, uint32_t width, uint32_t height, const uint8_t* y, u
     s->height = height;
     s->stride = width;
     s->pts_100ns = pts_100ns;
-    s->frame_number = s->frame_number + kSlotCount;
+    // A global frame sequence: consumers use it to tell "a new frame arrived" exactly. The
+    // previous write's number is visible here (its release store happened before latest_slot).
+    s->frame_number = latest == kNoSlot ? 1 : Slot(base, latest)->frame_number + 1;
     uint8_t* data = reinterpret_cast<uint8_t*>(s) + kSlotHeaderBytes;
     CopyPlane(data, width, y, y_pitch, width, height);
     CopyPlane(data + size_t(width) * height, width, uv, uv_pitch, width, height / 2);
@@ -107,6 +109,21 @@ bool ReadLatest(const void* base, uint32_t width, uint32_t height, uint8_t* dst,
         if (seq.load(std::memory_order_relaxed) == before) return true;
     }
     return false;
+}
+
+bool PeekLatest(const void* base, FrameInfo& info) {
+    auto* h = const_cast<Header*>(H(base));
+    const uint32_t i = Atomic(h->latest_slot).load(std::memory_order_acquire);
+    if (i >= kSlotCount) return false;
+    auto* s = const_cast<SlotHeader*>(Slot(base, i));
+    auto seq = Atomic(s->seq);
+    const uint32_t before = seq.load(std::memory_order_acquire);
+    if (before & 1) return false;
+    FrameInfo tmp{s->width, s->height, s->pts_100ns, s->frame_number};
+    std::atomic_thread_fence(std::memory_order_acquire);
+    if (seq.load(std::memory_order_relaxed) != before) return false;
+    info = tmp;
+    return true;
 }
 
 void Objects::Close() {

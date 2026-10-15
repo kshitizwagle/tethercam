@@ -62,7 +62,7 @@ private:
     void RunSession(net::Socket& sock);
     // Keeps the camera device open and fed, and reports whether an app is reading it.
     Consumer TickCamera();
-    void FeedBlack();
+    void FeedIdle();
     MediaFormat OutputFormat() const;
     void SetStatus(AgentStatus s, const std::string& detail = {});
     void RememberCameraLocked();
@@ -84,7 +84,7 @@ private:
     std::atomic<bool> quality_dirty_{false};
 
     V4l2Output out_;
-    std::chrono::steady_clock::time_point last_write_{}, last_scan_{}, last_open_try_{};
+    std::chrono::steady_clock::time_point last_write_{}, last_any_write_{}, last_scan_{}, last_open_try_{};
     int openers_ = 0;
     bool warned_no_device_ = false;
 

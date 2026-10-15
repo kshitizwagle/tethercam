@@ -174,25 +174,55 @@ struct H264Decoder::Impl {
         sample->GetSampleTime(&pts);
         wil::com_ptr<IMFMediaBuffer> buf;
         if (FAILED(sample->GetBufferByIndex(0, &buf))) return false;
-        if (auto b2d = buf.try_query<IMF2DBuffer>()) {
-            BYTE* scan0 = nullptr;
-            LONG pitch = 0;
-            if (FAILED(b2d->Lock2D(&scan0, &pitch))) return false;
-            image::Nv12View v{scan0, scan0 + size_t(pitch) * coded_height, uint32_t(pitch), uint32_t(pitch),
-                              display_width, display_height};
-            cb(v, pts);
-            b2d->Unlock2D();
-            return true;
+
+        DecodedFrame frame;
+        frame.coded_width = coded_width;
+        frame.coded_height = coded_height;
+        frame.display_width = display_width;
+        frame.display_height = display_height;
+
+        // Hardware frames: offer the DXGI surface itself. Consumers that can scale on the GPU use
+        // it and never download; everyone else calls View().
+        if (device) {
+            auto dxgi = buf.try_query<IMFDXGIBuffer>();
+            UINT index = 0;
+            if (dxgi && SUCCEEDED(dxgi->GetSubresourceIndex(&index)) &&
+                SUCCEEDED(dxgi->GetResource(IID_PPV_ARGS(&frame.texture))))
+                frame.subresource = index;
         }
-        BYTE* p = nullptr;
-        DWORD len = 0;
-        if (FAILED(buf->Lock(&p, nullptr, &len))) return false;
-        const uint32_t pitch = static_cast<uint32_t>(std::abs(default_stride));
-        if (size_t(pitch) * coded_height * 3 / 2 <= len) {
-            image::Nv12View v{p, p + size_t(pitch) * coded_height, pitch, pitch, display_width, display_height};
-            cb(v, pts);
-        }
-        buf->Unlock();
+
+        auto b2d = buf.try_query<IMF2DBuffer>();
+        bool got = false, locked2d = false, locked1d = false;
+        image::Nv12View view;
+        frame.view_fn = [&]() -> image::Nv12View {
+            if (got) return view;
+            got = true;
+            if (b2d) {
+                BYTE* scan0 = nullptr;
+                LONG pitch = 0;
+                if (SUCCEEDED(b2d->Lock2D(&scan0, &pitch))) {
+                    view = {scan0, scan0 + size_t(pitch) * coded_height, uint32_t(pitch), uint32_t(pitch), display_width,
+                            display_height};
+                    locked2d = true;
+                }
+            } else {
+                BYTE* p = nullptr;
+                DWORD len = 0;
+                if (SUCCEEDED(buf->Lock(&p, nullptr, &len))) {
+                    locked1d = true;
+                    const uint32_t pitch = static_cast<uint32_t>(std::abs(default_stride));
+                    if (size_t(pitch) * coded_height * 3 / 2 <= len)
+                        view = {p, p + size_t(pitch) * coded_height, pitch, pitch, display_width, display_height};
+                }
+            }
+            return view;
+        };
+
+        cb(frame, pts);
+
+        if (locked2d) b2d->Unlock2D();
+        if (locked1d) buf->Unlock();
+        if (frame.texture) frame.texture->Release();
         return true;
     }
 
@@ -236,6 +266,8 @@ H264Decoder::~H264Decoder() {
 }
 
 bool H264Decoder::IsHardware() const { return impl_->hardware; }
+
+ID3D11Device* H264Decoder::Device() const { return impl_->device.get(); }
 
 bool H264Decoder::Init(uint32_t width, uint32_t height, uint32_t fps, bool prefer_hardware) {
     auto& d = *impl_;
@@ -295,6 +327,165 @@ bool H264Decoder::Decode(std::span<const uint8_t> au, int64_t pts_100ns, const F
 
 void H264Decoder::Flush() {
     if (impl_->mft) impl_->mft->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+}
+
+// ---------------------------------------------------------------------------------------------
+// GPU scaling
+
+struct Nv12Scaler::Impl {
+    wil::com_ptr<ID3D11Device> device;
+    wil::com_ptr<ID3D11DeviceContext> context;
+    wil::com_ptr<ID3D11VideoDevice> video;
+    wil::com_ptr<ID3D11VideoContext> video_ctx;
+    wil::com_ptr<ID3D11VideoProcessorEnumerator> enumerator;
+    wil::com_ptr<ID3D11VideoProcessor> processor;
+    bool broken = false;  // a setup failure: stay on the CPU path for good
+    uint32_t in_w = 0, in_h = 0, out_w = 0, out_h = 0;
+    wil::com_ptr<ID3D11Texture2D> out_tex;
+    wil::com_ptr<ID3D11VideoProcessorOutputView> out_view;
+    wil::com_ptr<ID3D11Texture2D> staging;
+    // The decoder rotates a small pool of surfaces; keep the matching input view around.
+    ID3D11Texture2D* last_src = nullptr;
+    UINT last_subresource = 0;
+    wil::com_ptr<ID3D11VideoProcessorInputView> in_view;
+
+    // Everything the processor needs, rebuilt when the geometry changes.
+    bool Reset(uint32_t iw, uint32_t ih, uint32_t ow, uint32_t oh) {
+        processor.reset();
+        enumerator.reset();
+        out_tex.reset();
+        out_view.reset();
+        staging.reset();
+        in_view.reset();
+        last_src = nullptr;
+        last_subresource = 0;
+        in_w = iw;
+        in_h = ih;
+        out_w = ow;
+        out_h = oh;
+
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{};
+        desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+        desc.InputFrameRate = {30, 1};
+        desc.InputWidth = iw;
+        desc.InputHeight = ih;
+        desc.OutputFrameRate = {30, 1};
+        desc.OutputWidth = ow;
+        desc.OutputHeight = oh;
+        desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+        if (FAILED(video->CreateVideoProcessorEnumerator(&desc, &enumerator))) return false;
+        UINT support = 0;
+        if (FAILED(enumerator->CheckVideoProcessorFormat(DXGI_FORMAT_NV12, &support)) ||
+            (support & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT) == 0)
+            return false;
+        support = 0;
+        if (FAILED(enumerator->CheckVideoProcessorFormat(DXGI_FORMAT_NV12, &support)) ||
+            (support & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT) == 0)
+            return false;
+        if (FAILED(video->CreateVideoProcessor(enumerator.get(), 0, &processor))) return false;
+
+        D3D11_TEXTURE2D_DESC td{};
+        td.Width = ow;
+        td.Height = oh;
+        td.MipLevels = 1;
+        td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_NV12;
+        td.SampleDesc = {1, 0};
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_RENDER_TARGET;
+        if (FAILED(device->CreateTexture2D(&td, nullptr, &out_tex))) return false;
+        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC od{};
+        od.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+        od.Texture2D.MipSlice = 0;
+        if (FAILED(video->CreateVideoProcessorOutputView(out_tex.get(), enumerator.get(), &od, &out_view))) return false;
+        td.BindFlags = 0;
+        td.Usage = D3D11_USAGE_STAGING;
+        td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        if (FAILED(device->CreateTexture2D(&td, nullptr, &staging))) return false;
+
+        // Constant stream state: no framerate conversion, no auto-processing, BT.601 limited range
+        // (the same convention as the rest of the pipeline), black outside the stretch rect.
+        video_ctx->VideoProcessorSetOutputTargetRect(processor.get(), FALSE, nullptr);
+        video_ctx->VideoProcessorSetStreamFrameFormat(processor.get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+        video_ctx->VideoProcessorSetStreamAutoProcessingMode(processor.get(), 0, FALSE);
+        D3D11_VIDEO_COLOR bg{};
+        bg.YCbCr = {16.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f, 1.0f};
+        video_ctx->VideoProcessorSetOutputBackgroundColor(processor.get(), FALSE, &bg);
+        D3D11_VIDEO_PROCESSOR_COLOR_SPACE cs{};
+        cs.Usage = 0;
+        cs.RGB_Range = 0;
+        cs.YCbCr_Matrix = 0;  // BT.601
+        cs.YCbCr_xvYCC = 0;
+        cs.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
+        video_ctx->VideoProcessorSetStreamColorSpace(processor.get(), 0, &cs);
+        video_ctx->VideoProcessorSetOutputColorSpace(processor.get(), &cs);
+        return true;
+    }
+};
+
+Nv12Scaler::Nv12Scaler() = default;
+Nv12Scaler::~Nv12Scaler() = default;
+
+bool Nv12Scaler::Init(ID3D11Device* device) {
+    impl_ = std::make_unique<Impl>();
+    if (!device) return false;
+    auto& d = *impl_;
+    d.device.reset(device);
+    d.device->AddRef();  // wil::reset takes ownership, the decoder keeps its own reference
+    if (FAILED(d.device->GetImmediateContext(&d.context))) return false;
+    if (!(d.video = d.device.try_query<ID3D11VideoDevice>())) return false;
+    if (!(d.video_ctx = d.device.try_query<ID3D11VideoContext>())) return false;
+    return true;
+}
+
+bool Nv12Scaler::Ok() const { return impl_ && !impl_->broken && impl_->video_ctx != nullptr; }
+
+bool Nv12Scaler::Scale(const DecodedFrame& src, uint32_t dst_width, uint32_t dst_height,
+                       const std::function<bool(const image::Nv12View&)>& write) {
+    if (!impl_) return false;
+    auto& d = *impl_;
+    if (d.broken || !src.texture) return false;
+    if (!d.processor || d.in_w != src.coded_width || d.in_h != src.coded_height || d.out_w != dst_width ||
+        d.out_h != dst_height) {
+        if (!d.Reset(src.coded_width, src.coded_height, dst_width, dst_height)) {
+            d.broken = true;
+            return false;
+        }
+        log::Info("GPU scale ready: {}x{} -> {}x{}", src.coded_width, src.coded_height, dst_width, dst_height);
+    }
+
+    if (d.last_src != src.texture || d.last_subresource != src.subresource || !d.in_view) {
+        D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC id{};
+        id.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+        id.Texture2D.MipSlice = 0;
+        id.Texture2D.ArraySlice = src.subresource;
+        wil::com_ptr<ID3D11VideoProcessorInputView> view;
+        if (FAILED(d.video->CreateVideoProcessorInputView(src.texture, d.enumerator.get(), &id, &view))) return false;
+        d.in_view = std::move(view);
+        d.last_src = src.texture;
+        d.last_subresource = src.subresource;
+    }
+
+    const RECT src_rect{0, 0, LONG(src.display_width), LONG(src.display_height)};
+    const image::Rect fit = image::LetterboxRect(src.display_width, src.display_height, dst_width, dst_height);
+    const RECT dst_rect{LONG(fit.x), LONG(fit.y), LONG(fit.x + fit.w), LONG(fit.y + fit.h)};
+    d.video_ctx->VideoProcessorSetStreamSourceRect(d.processor.get(), 0, TRUE, &src_rect);
+    d.video_ctx->VideoProcessorSetStreamOutputRect(d.processor.get(), 0, &dst_rect);
+
+    D3D11_VIDEO_PROCESSOR_STREAM stream{};
+    stream.Enable = TRUE;
+    stream.pInputSurface = d.in_view.get();
+    if (FAILED(d.video_ctx->VideoProcessorBlt(d.processor.get(), d.out_view.get(), 0, 1, &stream))) return false;
+
+    d.context->CopyResource(d.staging.get(), d.out_tex.get());
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(d.context->Map(d.staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) return false;
+    const auto* y = static_cast<const uint8_t*>(mapped.pData);
+    image::Nv12View view{y, y + size_t(mapped.RowPitch) * dst_height, mapped.RowPitch, mapped.RowPitch, dst_width,
+                         dst_height};
+    const bool ok = write(view);
+    d.context->Unmap(d.staging.get(), 0);
+    return ok;
 }
 
 // ---------------------------------------------------------------------------------------------

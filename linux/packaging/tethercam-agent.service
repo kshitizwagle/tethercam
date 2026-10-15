@@ -11,6 +11,9 @@ After=graphical-session.target
 ExecStart=/usr/bin/tethercam-agent
 Restart=on-failure
 RestartSec=2
+# Keep decode + camera delivery schedulable while the machine is busy (applied within the user
+# slice on systemd versions that delegate cgroups; harmless otherwise).
+CPUWeight=500
 
 [Install]
 WantedBy=graphical-session.target

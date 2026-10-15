@@ -2,6 +2,29 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-16: Under load and during stalls, Linux host (fakephone)
+
+**Setup:** the M10 load harness: `fakephone --port 5321` → `tethercam-agent --tcp 127.0.0.1:5321
+--device /dev/video42 --no-tray --always-on` (1080p60, YUYV) → `v4l2probe /dev/video42`, 20 s per run,
+24 busy-loop burners on the 16-thread desktop. Baseline = the build before the M10 changes; runs were
+interleaved (base, new, base, new) to cancel machine drift.
+
+| Build | Delivered | Gaps > 50 ms |
+|---|---|---|
+| baseline | 30.11, 32.51 fps (mean 31.3) | 11.2 %, 8.3 % (mean 9.8 %) |
+| M10 | 34.28, 33.98 fps (mean 34.1) | 7.5 %, 6.5 % (mean 7.0 %) |
+
+Idle (no load): 60.00 fps on both, so the difference is load-specific (SSE2 YUYV pack, two-thread
+resample, non-blocking writes that drop a frame instead of stalling the session).
+
+**Stall policy:** `SIGSTOP` on `fakephone` for 1.8 s mid-stream, mean luma of every frame read from the
+loopback device: the last live frame (luma 56) is held for ~0.85 s after the source stops, then black
+(luma 16) until the stall exceeds the 750 ms window; live frames resume ~0.1 s after `SIGCONT`. Before
+the change, the first 100 ms of any stall already went black.
+
+**Not re-measured:** the Windows host (FrameReady handoff, host-clock PTS, MMCSS, GPU scale) needs an
+MSVC build and the same harness (target: ≤ 10 % frame loss at load24; M10 exit criterion).
+
 ## 2026-10-13: Glass-to-glass latency in Streamlabs (app 0.1.10, agent 0.1.11)
 
 Front camera, 1080p60 (Streamlabs source 1920x1080, buffering disabled), original Apple cable into a

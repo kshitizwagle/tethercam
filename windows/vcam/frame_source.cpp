@@ -52,7 +52,6 @@ void FrameSource::Start(uint32_t width, uint32_t height, uint32_t fps) {
     width_ = width;
     height_ = height;
     fps_ = fps ? fps : 30;
-    live_.Resize(width, height);
     placeholder_status_ = shm::AgentStatus(0xFFFFFFFF);
     last_new_frame_ms_ = 0;
     if (EnsureShm()) Announce("started");
@@ -118,9 +117,10 @@ const image::Nv12Frame& FrameSource::Placeholder(shm::AgentStatus status) {
     return placeholder_;
 }
 
-bool FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pitch) {
+FillResult FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pitch, uint32_t grace_ms) {
     std::lock_guard lock(mu_);
-    if (width_ == 0) return false;
+    FillResult out;
+    if (width_ == 0) return out;
     shm::AgentStatus status = shm::AgentStatus::None;
     bool status_card = false;  // default: plain black while not live, so stream layouts show through cleanly
     if (EnsureShm()) {
@@ -135,15 +135,26 @@ bool FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pi
         if (agent_alive) {
             status = static_cast<shm::AgentStatus>(shm::Atomic(h->agent_status).load(std::memory_order_acquire));
             status_card = shm::Atomic(h->placeholder_mode).load(std::memory_order_relaxed) == 1;
+
+            // The agent signals FrameReady on every publish. If the newest frame is one we have
+            // already delivered, give a late frame a short window before repeating it: the sample
+            // still goes out on time, but a frame landing mid-wait is shown fresh.
+            shm::FrameInfo peek;
+            if (grace_ms && shm_.frame_ready && shm::PeekLatest(shm_.view, peek) &&
+                peek.frame_number == last_frame_number_ && peek.width == width_ && peek.height == height_)
+                WaitForSingleObject(shm_.frame_ready, grace_ms);
+
             shm::FrameInfo info;
-            if (shm::ReadLatest(shm_.view, width_, height_, live_.data.data(), width_, info)) {
-                if (info.frame_number != last_frame_number_) {
+            if (shm::ReadLatest(shm_.view, width_, height_, y, y_pitch, info)) {
+                out.fresh = info.frame_number != last_frame_number_;
+                if (out.fresh) {
                     last_frame_number_ = info.frame_number;
                     last_new_frame_ms_ = now;
                 }
                 if (now - last_new_frame_ms_ < kFrameTimeoutMs) {
-                    CopyPlanes(live_, y, y_pitch, uv, uv_pitch);
-                    return true;
+                    out.live = true;
+                    out.pts_100ns = info.pts_100ns;
+                    return out;
                 }
             }
         }
@@ -154,7 +165,7 @@ bool FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pi
         for (uint32_t r = 0; r < height_; ++r) std::memset(y + size_t(r) * y_pitch, 16, width_);
         for (uint32_t r = 0; r < height_ / 2; ++r) std::memset(uv + size_t(r) * uv_pitch, 128, width_);
     }
-    return false;
+    return out;
 }
 
 }  // namespace tethercam::vcam

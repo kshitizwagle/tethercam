@@ -16,6 +16,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 | M7 | Release v0.1 | ✅ every green main build publishes MSI + IPA as Latest; AltStore source auto-updated |
 | M8 | Backlog | ⬜ |
 | M9 | Linux host | 🟨 agent, tray, packages done and verified with fakephone; package install and real iPhone pending |
+| M10 | Under-load performance + GPU path | 🟨 code complete and verified on Linux; Windows build + load test pending |
 
 ## M0: Foundations
 **Goal:** a project anyone can clone, understand and build.
@@ -88,9 +89,9 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 - [x] Every green build of main is tagged `vX.Y.Z` and released as Latest with MSI + IPA + SHA256SUMS (`ci.yml`; docs-only pushes skip CI)
 
 ## M8: Backlog
-Audio (virtual microphone), HEVC, Windows 10 DirectShow fallback, focus/exposure, GPU scaling and shared
-D3D11 textures, Swift 6 language mode, ARM64, choosing between several phones, usbmuxd `Listen` instead of
-polling.
+Audio (virtual microphone), HEVC, Windows 10 DirectShow fallback, focus/exposure, shared D3D11
+textures (GPU scaling landed in M10), Swift 6 language mode, ARM64, choosing between several phones,
+usbmuxd `Listen` instead of polling.
 
 ## M9: Linux host
 **Goal:** the same iPhone works as a webcam on Linux desktops, installed from a .deb or .rpm.
@@ -102,3 +103,14 @@ polling.
 - [x] Tray via StatusNotifierItem (KDE; GNOME with the AppIndicator extension); systemd user service starts the agent at login (tray starts on Ubuntu 26.04 GNOME/Wayland; login autostart not yet tried from an installed package)
 - [ ] `.deb` + `.rpm` built in CI with dependencies on `v4l2loopback-dkms` and `usbmuxd` (built and tested in Ubuntu 24.04/26.04 and Fedora containers; install → service enabled → agent runs → uninstall → service disabled verified in clean Ubuntu 26.04 and Fedora containers); install on a real desktop with the module loaded pending (admin)
 - [ ] Real iPhone verified in Firefox, Chromium, OBS and Zoom on Linux (device)
+
+## M10: Under-load performance + GPU path
+**Goal:** the webcam keeps its frame rate and its clock while the machine is busy (the load-test failures).
+**Exit criteria:**
+- [x] vcam: samples wait on the agent's FrameReady event with a bounded late-frame grace; live frames carry the agent's capture timestamp, repeats advance the clock, `MFSampleExtension_Discontinuity` marks live edges
+- [x] vcam: fill goes straight into the sample buffer (one copy instead of two)
+- [x] Shared memory: a global frame sequence + `PeekLatest`, so consumers tell fresh from repeat exactly
+- [x] Agent: MMCSS "Capture" (high) for the media thread with an above-normal fallback; PTS from QPC anchored to `MFGetSystemTime()`
+- [x] Agent: GPU scale + letterbox (`VideoProcessorBlt` on the decode device) with the CPU path as fallback; decoded D3D11 surfaces are handed over without a download (`DecodedFrame`)
+- [x] Linux: a stall repeats the last frame (≤ 750 ms) instead of flickering black; non-blocking writes drop frames instead of stalling the session; SSE2 YUYV pack; two-thread resample; `setpriority` + `CPUWeight=500`
+- [ ] Windows build + re-run the load harness (target: ≤ 10 % frame loss at load24); the Linux A/B measured 31.3 → 34.1 fps with fewer long gaps (`docs/perf.md`)

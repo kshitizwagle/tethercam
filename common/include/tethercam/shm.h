@@ -100,6 +100,10 @@ struct FrameInfo {
 bool ReadLatest(const void* base, uint32_t width, uint32_t height, uint8_t* dst, uint32_t dst_pitch,
                 FrameInfo& info);
 
+// Consumer: reads the newest frame's metadata without copying its planes. Cheap enough to call
+// before ReadLatest (e.g. to notice that nothing changed and skip the copy).
+bool PeekLatest(const void* base, FrameInfo& info);
+
 // Kernel objects. Create* is used by the vcam (LocalService); Open* by the agent.
 struct Objects {
     HANDLE mapping = nullptr;

@@ -1,5 +1,7 @@
 #include "engine.h"
 
+#include <sys/resource.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <format>
@@ -18,8 +20,10 @@ using Clock = std::chrono::steady_clock;
 constexpr auto kSilenceTimeout = std::chrono::seconds(3);
 constexpr auto kConsumerGrace = std::chrono::seconds(2);
 constexpr auto kOpenerScan = std::chrono::milliseconds(500);
-// While there's no live video, readers still get a black frame this often (and never stall).
+// While there's no live video, readers still get a frame this often (and never stall).
 constexpr auto kIdleFrame = std::chrono::milliseconds(100);
+// A stall shorter than this holds the last live frame; longer goes black (nothing looks frozen).
+constexpr auto kStaleFrame = std::chrono::milliseconds(750);
 constexpr MediaFormat kAutoFormat{1920, 1080, 30};
 
 bool SleepUnless(const std::atomic<bool>& stop, int ms) {
@@ -178,12 +182,15 @@ Engine::Consumer Engine::TickCamera() {
     return c;
 }
 
-void Engine::FeedBlack() {
+void Engine::FeedIdle() {
     const auto now = Clock::now();
-    if (out_.IsOpen() && now - last_write_ >= kIdleFrame) {
-        last_write_ = now;
-        out_.WriteBlack();
-    }
+    // Fires only when nothing at all went to the camera recently (live frames count too).
+    if (!out_.IsOpen() || now - last_any_write_ < kIdleFrame) return;
+    last_any_write_ = now;
+    // A short stall (a phone hiccup, a keyframe wait): repeat the last frame instead of flickering
+    // black over live video. Real idle still goes black, so nothing looks frozen.
+    if (last_write_ != Clock::time_point{} && now - last_write_ < kStaleFrame) out_.Repeat();
+    else out_.WriteBlack();
 }
 
 bool Engine::OpenLink(net::Socket& out) {
@@ -221,10 +228,13 @@ bool Engine::OpenLink(net::Socket& out) {
 
 void Engine::Run() {
     net::Init();
+    // Keep the decode/delivery loop schedulable on a loaded machine (the systemd unit raises
+    // CPUWeight as well). Silently ignored when RLIMIT_NICE doesn't allow it.
+    if (::setpriority(PRIO_PROCESS, 0, -5) == 0) log::Info("media priority: nice -5");
     log::Info("Tethercam agent {} started{}", Version(), opt_.tcp.empty() ? "" : " (TCP mode: " + opt_.tcp + ")");
     while (!stop_) {
         TickCamera();
-        FeedBlack();
+        FeedIdle();
         net::Socket sock;
         if (OpenLink(sock)) {
             live_socket_ = &sock;
@@ -242,7 +252,7 @@ void Engine::Run() {
         // Keep feeding the camera while waiting, so apps show black instead of freezing.
         for (int i = 0; i < 10 && !stop_; ++i) {
             TickCamera();
-            FeedBlack();
+            FeedIdle();
             SleepUnless(stop_, 100);
         }
     }
@@ -399,7 +409,10 @@ void Engine::RunSession(net::Socket& sock) {
                         image::ScaleLetterbox(v, preview_);
                         ++preview_seq_;
                     }
-                    if (out_.IsOpen() && out_.Write(v)) last_write_ = Clock::now();
+                    if (out_.IsOpen() && out_.Write(v)) {
+                        last_write_ = Clock::now();
+                        last_any_write_ = last_write_;
+                    }
                 });
                 if (!ok) {
                     log::Warn("decode error; requesting keyframe");
@@ -487,7 +500,7 @@ void Engine::RunSession(net::Socket& sock) {
             }
         }
         // Black frames whenever no decoded frame went out recently (not streaming, paused, stalled).
-        FeedBlack();
+        FeedIdle();
         if (options_dirty_.exchange(false)) {
             Snapshot s = Get();
             send(proto::SetOptions{uint8_t(s.mirror), s.rotation, 0});

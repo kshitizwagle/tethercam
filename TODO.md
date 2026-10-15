@@ -4,6 +4,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 [MILESTONES.md](MILESTONES.md).
 
 ## Next up
+- [ ] M10: build the Windows side (CI or a local MSVC build) — the MMCSS, GPU-scale and vcam changes are unverified there — then re-run the load harness against the frame-loss target and record it in `docs/perf.md`
 - [ ] M9 Linux host: `sudo apt install ./linux/build/rel/Tethercam-*.deb`, log out/in, check the service + tray autostart; then a real iPhone on Linux (Q7 pairing, Firefox/Chromium/OBS/Zoom rows in compat.md)
 - [x] Synchronized quality menus on iPhone, Windows preview and tray: Auto, 1080p30/60, 4K30/60; capture overrides, persistence and capability fallback
 - [ ] Build the updated iPhone app on macOS/CI and validate quality switching on the iPhone 15 Pro Max front camera; local Swift protocol checks pass, UIKit/AVFoundation build pending
@@ -15,6 +16,14 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 - [x] Camera registered machine-wide; Frame Server path verified (2026-10-13)
 - [x] iPhone visible over USB (`type=USB`, product 0x12a8) after Trust; usbmuxd Connect reaches the phone
 - [x] GitHub repo public, CI green (Windows + iOS)
+
+## M10: Under-load performance + GPU path
+- [x] vcam: FrameReady wait + 2 ms late-frame grace, capture-clock sample times, discontinuity edges, single-copy fill
+- [x] Shared memory: global frame sequence + `PeekLatest` (fresh vs repeat, exactly)
+- [x] Agent: MMCSS media thread, host-clock (QPC) PTS, GPU scale via `Nv12Scaler` (`DecodedFrame` surfaces, CPU fallback)
+- [x] Linux: 750 ms hold-the-frame stall policy, non-blocking v4l2 writes, SSE2 YUYV pack, two-thread resample, priority attempts
+- [ ] Windows build + load harness (≤ 10 % frame loss at load24); Streamlabs latency spot check
+- [ ] `vcamcheck` sample-time check on Windows (the plan's `--check-pts`, deferred)
 
 ## M9: Linux host
 - [x] Move `windows/common` → `common/`; POSIX paths in `net`/`log`/`usbmux`; Linux CI job runs the unit tests (shm stays Windows-only)
@@ -66,7 +75,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 
 ## M5: Full resolution
 - [x] 10 advertised media types; format chooser (exact / covering / largest)
-- [x] CPU scaling + letterbox (GPU path is M8)
+- [x] CPU scaling + letterbox (GPU path landed in M10)
 - [x] Bitrate table shared by C++ and Swift
 - [x] Lens, mirror, rotation from the tray via `SetCamera` / `SetOptions`
 - [x] iOS thermal policy (serious: half bitrate, ≤30 fps; critical: stop)
@@ -89,6 +98,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 - [x] Release workflow with checksums (MSI + unsigned IPA); pre-release tag v0.1.0-alpha.1
 
 ## Session log
+- 2026-10-16: Under-load performance + GPU path (M10). Windows: vcam samples wait on the agent's FrameReady event (2 ms late-frame grace) and carry the agent's capture timestamp (monotonic; foreign clock domains ignored; `MFSampleExtension_Discontinuity` on live/placeholder edges); `Fill` writes straight into the sample buffer; shared memory gets a global frame sequence + `PeekLatest`; the agent's media thread runs under MMCSS "Capture" (above-normal fallback) and stamps PTS from QPC anchored to `MFGetSystemTime()`; `Nv12Scaler` scales/letterboxes with `VideoProcessorBlt` on the decode device and the mapped result goes straight into shared memory (the decoded D3D11 surface is offered via `DecodedFrame`; a CPU view downloads lazily only when needed), CPU fallback on any failure. Linux: a ≤750 ms stall repeats the last frame instead of flickering black, v4l2 writes are non-blocking (drop, never stall the session), the YUYV pack is SSE2 and `image` resamples on two threads, plus `setpriority(-5)` where allowed and `CPUWeight=500` in the user unit. Verified: 37 Linux tests pass; load24 A/B 31.3 → 34.1 fps and gaps > 50 ms 9.8 % → 7.0 % (perf.md); SIGSTOP stall test holds the picture then goes black; idle 60.00 fps. Windows side not yet built (CI/local MSVC pending; `avrt` linked).
 - 2026-10-15 (3): Linux preview window (GTK3, `linux/agent/preview.cpp`): live feed letterboxed, lens/mirror/rotate/quality toolbar, tray "Open Tethercam" and `--preview`; engine got `SetPreview`/`CopyPreview` and treats an open preview as a consumer. Verified with fakephone (streams, no GTK warnings); window not seen by eye.
 - 2026-10-15 (2): GPU preference for decode: Linux tries dGPU then iGPU (VA-API, NVDEC on NVIDIA, `TETHERCAM_HW_DEVICE` override), verified on RX 9070 XT + Raphael with fakephone; Windows picks the adapter via `EnumAdapterByGpuPreference(HIGH_PERFORMANCE)` with an H.264 VLD check (needs a Windows build). Linux app icon fixed (hicolor has no 1024 dir; ship 16–512) and tray falls back to the app icon.
 - 2026-10-15: Linux host planned as M9 (TECH_SPEC §13, R8–R9, Q6–Q7; PLAN phase 9; MILESTONES; PRODUCT). Moved the core to `common/`, made sockets/logging/usbmux portable (Unix-socket usbmuxd, `UNIX:` addresses), added `linux/` CMake root and `linux.yml` CI. Then the Linux agent: FFmpeg VA-API/software decode, v4l2loopback output with `/proc` opener detection, settings file, AppIndicator tray, flock single instance, fakephone on Linux, CPack .deb/.rpm per distro + CI matrix. Verified: fakephone → agent → /dev/video42 → v4l2-ctl at 29.6 fps 1080p (VA-API) and 4K30 NV12 (software), start/stop on open/close, status API live/connected; 37 tests pass on Ubuntu 24.04, 26.04 (GCC 15) and Fedora containers. Package install/uninstall verified in clean Ubuntu 26.04 and Fedora containers. Not verified: Windows build (CI), install on this desktop (needs sudo), real iPhone on Linux.

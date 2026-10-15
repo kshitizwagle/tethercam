@@ -41,9 +41,12 @@ public:
     bool Write(const image::Nv12View& frame);
     // Writes a black frame, so readers keep getting frames while there's no video.
     bool WriteBlack();
+    // Re-sends the last written frame: a brief stall holds the picture instead of flashing black.
+    bool Repeat();
 
 private:
     bool WriteNv12(const image::Nv12View& v);
+    bool RawWrite();
 
     int fd_ = -1;
     std::string device_;
@@ -52,6 +55,7 @@ private:
     image::Nv12Frame scaled_;
     image::Nv12Frame black_;
     std::vector<uint8_t> out_;
+    bool has_frame_ = false;  // out_ holds a frame ready to repeat
     std::string last_error_;
 };
 

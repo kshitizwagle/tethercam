@@ -7,10 +7,15 @@
 
 #include <cerrno>
 #include <cstring>
-#include <format>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <system_error>
+
+#if defined(__SSE2__) || defined(_M_X64)
+#include <emmintrin.h>
+#define TETHERCAM_SSE2 1
+#endif
 
 #include "tethercam/log.h"
 
@@ -33,6 +38,25 @@ bool IsLoopback(const fs::path& sysdir) {
     // Older versions: a platform device named v4l2loopback.N.
     const auto target = fs::read_symlink(sysdir / "device", ec);
     return !ec && target.filename().string().starts_with("v4l2loopback");
+}
+
+// YUYV pack from NV12: Y0 U Y1 V per pixel pair, 16 pixels per iteration.
+void PackYuyvRow(const uint8_t* y_row, const uint8_t* uv_row, uint8_t* out, uint32_t w) {
+    uint32_t x = 0;
+#if defined(TETHERCAM_SSE2)
+    for (; x + 16 <= w; x += 16) {
+        const __m128i y = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y_row + x));
+        const __m128i uv = _mm_loadu_si128(reinterpret_cast<const __m128i*>(uv_row + x));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out + size_t(x) * 2), _mm_unpacklo_epi8(y, uv));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out + size_t(x) * 2 + 16), _mm_unpackhi_epi8(y, uv));
+    }
+#endif
+    for (; x + 1 < w; x += 2) {
+        out[size_t(x) * 2] = y_row[x];
+        out[size_t(x) * 2 + 1] = uv_row[x];
+        out[size_t(x) * 2 + 2] = y_row[x + 1];
+        out[size_t(x) * 2 + 3] = uv_row[x + 1];
+    }
 }
 
 }  // namespace
@@ -72,7 +96,9 @@ int CountOtherOpeners(const std::string& device) {
 bool V4l2Output::Open(const std::string& device, const MediaFormat& format, PixelFormat pixel_format) {
     if (fd_ < 0 || device != device_) {
         Close();
-        fd_ = ::open(device.c_str(), O_RDWR | O_CLOEXEC);
+        // Non-blocking: with no reader draining the loopback queue it fills up, and a stalled write
+        // must never stop the session (the frame is dropped instead).
+        fd_ = ::open(device.c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
         if (fd_ < 0) {
             // Retried every second; only log when the reason changes.
             std::string err = std::format("cannot open {}: {}", device, std::strerror(errno));
@@ -109,6 +135,7 @@ bool V4l2Output::Open(const std::string& device, const MediaFormat& format, Pixe
     format_ = format;
     pixel_format_ = pixel_format;
     out_.resize(f.fmt.pix.sizeimage);
+    has_frame_ = false;  // until a frame is written, repeats stay black
     black_.Resize(format.width, format.height);
     image::FillBlack(black_);
     log::Info("virtual camera {}: {}x{} @ {} {}", device, format.width, format.height, format.fps,
@@ -139,21 +166,24 @@ bool V4l2Output::WriteNv12(const image::Nv12View& v) {
         for (uint32_t y = 0; y < h / 2; ++y) std::memcpy(uv + size_t(y) * w, v.uv + size_t(y) * v.uv_pitch, w);
     } else {
         // YUYV: Y0 U Y1 V per pixel pair; chroma rows are shared by two luma rows.
-        for (uint32_t y = 0; y < h; ++y) {
-            const uint8_t* yr = v.y + size_t(y) * v.y_pitch;
-            const uint8_t* uvr = v.uv + size_t(y / 2) * v.uv_pitch;
-            uint8_t* o = out_.data() + size_t(y) * w * 2;
-            for (uint32_t x = 0; x < w; x += 2) {
-                o[0] = yr[x];
-                o[1] = uvr[x];
-                o[2] = yr[x + 1];
-                o[3] = uvr[x + 1];
-                o += 4;
-            }
-        }
+        for (uint32_t y = 0; y < h; ++y)
+            PackYuyvRow(v.y + size_t(y) * v.y_pitch, v.uv + size_t(y / 2) * v.uv_pitch,
+                        out_.data() + size_t(y) * w * 2, w);
     }
+    if (!RawWrite()) return false;
+    has_frame_ = true;
+    return true;
+}
+
+bool V4l2Output::Repeat() { return fd_ >= 0 && has_frame_ && RawWrite(); }
+
+bool V4l2Output::RawWrite() {
     const ssize_t n = ::write(fd_, out_.data(), out_.size());
-    return n == ssize_t(out_.size());
+    if (n == ssize_t(out_.size())) return true;
+    // EAGAIN: no reader is draining the loopback queue; drop this frame rather than wait.
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return false;
+    log::Warn("{}: write failed: {}", device_, n < 0 ? std::strerror(errno) : "short write");
+    return false;
 }
 
 }  // namespace tethercam::agent

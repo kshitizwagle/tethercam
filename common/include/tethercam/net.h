@@ -20,7 +20,7 @@ namespace tethercam::net {
 
 #ifdef _WIN32
 using SocketHandle = SOCKET;
-inline constexpr SocketHandle kInvalidSocket = kInvalidSocket;
+inline constexpr SocketHandle kInvalidSocket = INVALID_SOCKET;
 #else
 using SocketHandle = int;
 inline constexpr SocketHandle kInvalidSocket = -1;

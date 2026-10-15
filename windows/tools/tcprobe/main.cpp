@@ -230,10 +230,12 @@ int Stream(const Args& a) {
                     if (vf->IsKeyframe()) au = parameter_sets;
                     au.insert(au.end(), vf->data.begin(), vf->data.end());
                     const bool ok =
-                        decoder.Decode(au, int64_t(vf->pts_us * 10), [&](const image::Nv12View& v, int64_t) {
+                        decoder.Decode(au, int64_t(vf->pts_us * 10), [&](const media::DecodedFrame& f, int64_t) {
                             ++decoded;
                             ++window_decoded;
                             if (!a.snapshot.empty()) {
+                                const image::Nv12View v = f.View();
+                                if (!v.y) return;
                                 last.Resize(v.width, v.height);
                                 image::ScaleLetterbox(v, last);
                             }
