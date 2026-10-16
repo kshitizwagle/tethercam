@@ -4,7 +4,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 [MILESTONES.md](MILESTONES.md).
 
 ## Next up
-- [ ] M10: run the load harness on a Windows machine (target: ≤ 10 % frame loss at load24) and record it in `docs/perf.md`; the Windows build, tests and MSI are green in CI (v0.1.12)
+- [ ] M10: run `windows\scripts\load-test.ps1` in the Windows boot (dual-boot PC; target ≤ 10 % frame loss at load24) and record the table in `docs/perf.md`; the build, tests and MSI are green in CI (v0.1.12)
 - [ ] M9 Linux host: `sudo apt install ./linux/build/rel/Tethercam-*.deb`, log out/in, check the service + tray autostart; then a real iPhone on Linux (Q7 pairing, Firefox/Chromium/OBS/Zoom rows in compat.md)
 - [x] Synchronized quality menus on iPhone, Windows preview and tray: Auto, 1080p30/60, 4K30/60; capture overrides, persistence and capability fallback
 - [ ] Build the updated iPhone app on macOS/CI and validate quality switching on the iPhone 15 Pro Max front camera; local Swift protocol checks pass, UIKit/AVFoundation build pending
@@ -23,7 +23,8 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 - [x] Agent: MMCSS media thread, host-clock (QPC) PTS, GPU scale via `Nv12Scaler` (`DecodedFrame` surfaces, CPU fallback)
 - [x] Linux: 750 ms hold-the-frame stall policy, non-blocking v4l2 writes, SSE2 YUYV pack, two-thread resample, priority attempts
 - [x] Windows build + tests + MSI green in CI (MSVC Debug/Release; v0.1.12)
-- [ ] Windows load harness (≤ 10 % frame loss at load24) + Streamlabs latency spot check
+- [x] Windows load harness script: `windows\scripts\load-test.ps1` (fakephone → agent → Frame Server `vcamcheck read`, idle + load phases, one command)
+- [ ] Run it in the Windows boot: ≤ 10 % frame loss at load24 + Streamlabs latency spot check
 - [ ] `vcamcheck` sample-time check on Windows (the plan's `--check-pts`, deferred)
 
 ## M9: Linux host

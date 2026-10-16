@@ -23,8 +23,11 @@ loopback device: the last live frame (luma 56) is held for ~0.85 s after the sou
 the change, the first 100 ms of any stall already went black.
 
 **Not re-measured:** the Windows host (FrameReady handoff, host-clock PTS, MMCSS, GPU scale) builds and
-passes its tests in CI (v0.1.12) but still needs the load harness on a Windows machine (target: ≤ 10 %
-frame loss at load24; M10 exit criterion).
+passes its tests in CI (v0.1.12) but still needs the load harness run on the Windows boot of this PC
+(target: ≤ 10 % frame loss at load24; M10 exit criterion). The harness is one command:
+`powershell -ExecutionPolicy Bypass -File windows\scripts\load-test.ps1` (fakephone → agent →
+`vcamcheck read` through Frame Server, idle then load24; it also prints the `media thread:` and
+`GPU scale ready:` evidence lines).
 
 ## 2026-10-13: Glass-to-glass latency in Streamlabs (app 0.1.10, agent 0.1.11)
 

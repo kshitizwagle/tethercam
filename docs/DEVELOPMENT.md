@@ -100,6 +100,18 @@ build\vs2026-x64\tools\fakephone\Debug\fakephone.exe
 build\vs2026-x64\agent\Debug\tethercam-agent.exe --console --tcp 127.0.0.1:5321
 ```
 
+The under-load harness wraps exactly that and prints the M10 numbers (delivered fps, sample clock, frame
+loss) for an idle and a loaded run:
+
+```
+powershell -ExecutionPolicy Bypass -File windows\scripts\load-test.ps1           # load24, 20 s probes
+powershell -ExecutionPolicy Bypass -File windows\scripts\load-test.ps1 -Load 0   # idle only
+```
+
+It tests whichever camera is registered (the MSI or `dev-install.ps1`) through Frame Server, stops any
+running agent first, and shows the agent's `media thread:` and `GPU scale ready:` lines. Record the
+table in [perf.md](perf.md).
+
 ## Tools
 
 | Command | Use |

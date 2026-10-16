@@ -114,4 +114,4 @@ usbmuxd `Listen` instead of polling.
 - [x] Agent: GPU scale + letterbox (`VideoProcessorBlt` on the decode device) with the CPU path as fallback; decoded D3D11 surfaces are handed over without a download (`DecodedFrame`)
 - [x] Linux: a stall repeats the last frame (≤ 750 ms) instead of flickering black; non-blocking writes drop frames instead of stalling the session; SSE2 YUYV pack; two-thread resample; `setpriority` + `CPUWeight=500`
 - [x] Windows build, tests and MSI green in CI (v0.1.12)
-- [ ] Windows load harness (target: ≤ 10 % frame loss at load24); the Linux A/B measured 31.3 → 34.1 fps with fewer long gaps (`docs/perf.md`)
+- [ ] Windows load harness (`windows\scripts\load-test.ps1`; target: ≤ 10 % frame loss at load24); the Linux A/B measured 31.3 → 34.1 fps with fewer long gaps (`docs/perf.md`)
