@@ -2,6 +2,20 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-16 (2): Windows host after the vcam pacing fix (R10)
+
+Same setup as below, the vcam now delivers each sample as soon as a new frame arrives within its
+interval (fixed cadence, repeat only at the interval's end) instead of on a free-running timer.
+
+| Run | Idle new fps | load24 new fps | load24 loss | load24 gaps > 50 ms | Sample clock |
+|---|---|---|---|---|---|
+| 1 | 60.0 | 59.9 | 0.2 % | 0.0 % (longest 49 ms) | 60.2 / 60.0 |
+| 2 | 60.0 | 60.0 | 0.0 % | 0.4 % (longest 62 ms) | 60.2 / 59.8 |
+
+**Meets the M10 target** (was 13–16 % loss). Idle vcam repeats 0 per 300 samples (was 31–79); longest
+idle gap 20–23 ms. In-process (`vcamcheck direct`) 60.0 new fps, 0 repeats, longest gap 22 ms, and a
+30 fps consumer still gets 30.0 fps from the 60 fps phone stream.
+
 ## 2026-10-16: Under load, Windows host through Frame Server (fakephone)
 
 **Setup:** `windows\scripts\load-test.ps1` on the 16-thread desktop (RX 9070 XT, hardware decode), Release
@@ -20,7 +34,7 @@ as bad and varies run to run. The vcam log shows repeats on 10–26 % of samples
 `vcamcheck direct`: ~1.5 %, 59.2 new fps, longest gap 34 ms). The vcam paces samples on its own 60 Hz
 timer, independent of frame arrival; when the two 60 Hz clocks are near phase, a few ms of arrival
 jitter beyond the 2 ms grace turns into repeat + skip pairs. Long stalls under load are rare (2.5 %
-gaps > 50 ms vs 7.0 % on Linux). Next: pace delivery from frame arrival (risk R10).
+gaps > 50 ms vs 7.0 % on Linux). Fixed the same day, see above.
 
 ## 2026-10-16: Under load and during stalls, Linux host (fakephone)
 

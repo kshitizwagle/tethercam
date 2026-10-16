@@ -4,7 +4,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 [MILESTONES.md](MILESTONES.md).
 
 ## Next up
-- [ ] M10: vcam sample pacing from frame arrival (R10), then rerun `windows\scripts\load-test.ps1` (needs the elevated `dev-install.ps1 -Configuration Release` after each vcam rebuild); first run missed: idle 42–53 new fps, load24 13–16 % loss (perf.md)
+- [ ] Release v0.1.13 with the M10 vcam pacing fix (the installed MSI is pre-M10); then the Streamlabs latency spot check with the real iPhone (perf.md, same method as 2026-10-13)
 - [ ] M9 Linux host: `sudo apt install ./linux/build/rel/Tethercam-*.deb`, log out/in, check the service + tray autostart; then a real iPhone on Linux (Q7 pairing, Firefox/Chromium/OBS/Zoom rows in compat.md)
 - [x] Synchronized quality menus on iPhone, Windows preview and tray: Auto, 1080p30/60, 4K30/60; capture overrides, persistence and capability fallback
 - [ ] Build the updated iPhone app on macOS/CI and validate quality switching on the iPhone 15 Pro Max front camera; local Swift protocol checks pass, UIKit/AVFoundation build pending
@@ -19,12 +19,14 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 
 ## M10: Under-load performance + GPU path
 - [x] vcam: FrameReady wait + 2 ms late-frame grace, capture-clock sample times, discontinuity edges, single-copy fill
+- [x] vcam: interval-window pacing (deliver on arrival, repeat only at the interval's end) replaces the free-running timer + grace (R10)
 - [x] Shared memory: global frame sequence + `PeekLatest` (fresh vs repeat, exactly)
 - [x] Agent: MMCSS media thread, host-clock (QPC) PTS, GPU scale via `Nv12Scaler` (`DecodedFrame` surfaces, CPU fallback)
 - [x] Linux: 750 ms hold-the-frame stall policy, non-blocking v4l2 writes, SSE2 YUYV pack, two-thread resample, priority attempts
 - [x] Windows build + tests + MSI green in CI (MSVC Debug/Release; v0.1.12)
 - [x] Windows load harness script: `windows\scripts\load-test.ps1` (fakephone → agent → Frame Server `vcamcheck read`, idle + load phases, one command)
-- [ ] Run it in the Windows boot: ≤ 10 % frame loss at load24 + Streamlabs latency spot check
+- [x] Run it in the Windows boot: ≤ 10 % frame loss at load24 (0–0.2 %, perf.md)
+- [ ] Streamlabs latency spot check with the real iPhone after the pacing change
 - [ ] `vcamcheck` sample-time check on Windows (the plan's `--check-pts`, deferred)
 
 ## M9: Linux host
@@ -100,6 +102,7 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 - [x] Release workflow with checksums (MSI + unsigned IPA); pre-release tag v0.1.0-alpha.1
 
 ## Session log
+- 2026-10-16 (3): Fixed R10. `RequestSample` gives each sample a one-interval window on a fixed cadence and sends it as soon as `FrameSource::WaitForFresh` sees an undelivered frame (FrameReady or the interval's high-res timer, 4 ms re-check because the auto-reset event is shared), repeating only at the window's end; the 2 ms grace is gone. Through Frame Server: idle 60.0 new fps (0 repeats), load24 59.9–60.0 fps, 0–0.2 % loss, two runs. 43 tests pass. M10 done.
 - 2026-10-16 (2): First Windows load-harness run. Fixed three harness blockers: it waited for `video:` before opening the camera (the phone only streams once a consumer exists), `--console` reopened the agent's redirected stderr onto a console (now kept when redirected), and "delivered fps" counted repeats/black (`vcamcheck` now reports new frames, gaps > 50 ms and the longest gap; the script checks sample clock, idle and load24). Release build + 43 tests pass locally. Result: misses the target, idle 42–53 new fps and load24 13–16 % loss through Frame Server vs 59.2 fps in-process: the vcam's free-running timer beats against the frame cadence (R10).
 - 2026-10-16: Under-load performance + GPU path (M10). Windows: vcam samples wait on the agent's FrameReady event (2 ms late-frame grace) and carry the agent's capture timestamp (monotonic; foreign clock domains ignored; `MFSampleExtension_Discontinuity` on live/placeholder edges); `Fill` writes straight into the sample buffer; shared memory gets a global frame sequence + `PeekLatest`; the agent's media thread runs under MMCSS "Capture" (above-normal fallback) and stamps PTS from QPC anchored to `MFGetSystemTime()`; `Nv12Scaler` scales/letterboxes with `VideoProcessorBlt` on the decode device and the mapped result goes straight into shared memory (the decoded D3D11 surface is offered via `DecodedFrame`; a CPU view downloads lazily only when needed), CPU fallback on any failure. Linux: a ≤750 ms stall repeats the last frame instead of flickering black, v4l2 writes are non-blocking (drop, never stall the session), the YUYV pack is SSE2 and `image` resamples on two threads, plus `setpriority(-5)` where allowed and `CPUWeight=500` in the user unit. Verified: 37 Linux tests pass; load24 A/B 31.3 → 34.1 fps and gaps > 50 ms 9.8 % → 7.0 % (perf.md); SIGSTOP stall test holds the picture then goes black; idle 60.00 fps. Windows side builds green in CI after three MSVC fix rounds (`wil` raw-pointer assignment, `MFGetSystemTime` is in `mfidl.h`, nested `FrameSource::FillResult`, `avrt` for the agent tests); v0.1.12 published.
 - 2026-10-15 (3): Linux preview window (GTK3, `linux/agent/preview.cpp`): live feed letterboxed, lens/mirror/rotate/quality toolbar, tray "Open Tethercam" and `--preview`; engine got `SetPreview`/`CopyPreview` and treats an open preview as a consumer. Verified with fakephone (streams, no GTK warnings); window not seen by eye.

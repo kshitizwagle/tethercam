@@ -117,7 +117,7 @@ private:
     MF_STREAM_STATE state_ = MF_STREAM_STATE_STOPPED;
     bool shutdown_ = false;
     uint32_t width_ = 0, height_ = 0, fps_ = 30;
-    LONGLONG next_due_ = 0;
+    LONGLONG window_open_ = 0;  // start of the next sample's delivery interval (MFGetSystemTime)
     HANDLE timer_ = nullptr;
     FrameSource frames_;
     uint64_t delivered_ = 0, live_ = 0, repeated_ = 0;

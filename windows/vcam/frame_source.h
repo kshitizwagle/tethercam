@@ -25,10 +25,13 @@ public:
     void Start(uint32_t width, uint32_t height, uint32_t fps);
     void Stop();
 
+    // Returns once the agent has published a frame of the started size that this source has not
+    // delivered yet, or when `deadline` (a waitable timer the caller has armed) fires. Without
+    // shared memory it just waits for the deadline.
+    void WaitForFresh(HANDLE deadline);
+
     // Writes one frame of the started size into dst (NV12 with the given pitch; UV plane at uv).
-    // When the newest frame was already delivered, waits up to `grace_ms` for the agent's FrameReady
-    // signal (a frame landing just after the due time is used instead of repeating).
-    FillResult Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pitch, uint32_t grace_ms = 0);
+    FillResult Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pitch);
 
     // Records a status line in shared memory for the agent's log.
     void Report(const char* message);

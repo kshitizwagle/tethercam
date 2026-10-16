@@ -117,7 +117,38 @@ const image::Nv12Frame& FrameSource::Placeholder(shm::AgentStatus status) {
     return placeholder_;
 }
 
-FrameSource::FillResult FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pitch, uint32_t grace_ms) {
+void FrameSource::WaitForFresh(HANDLE deadline) {
+    HANDLE ready = nullptr;
+    const void* view = nullptr;
+    uint64_t delivered = 0;
+    uint32_t w = 0, h = 0;
+    {
+        std::lock_guard lock(mu_);
+        if (width_ && EnsureShm() && shm_.frame_ready) {
+            ready = shm_.frame_ready;  // shm handles live as long as this object once opened
+            view = shm_.view;
+            delivered = last_frame_number_;
+            w = width_;
+            h = height_;
+        }
+    }
+    if (!deadline) return;
+    if (!ready) {
+        WaitForSingleObject(deadline, 1000);
+        return;
+    }
+    const HANDLE handles[2] = {ready, deadline};
+    for (;;) {
+        shm::FrameInfo peek;
+        if (shm::PeekLatest(view, peek) && peek.frame_number != delivered && peek.width == w && peek.height == h) return;
+        // FrameReady is auto-reset and shared by every source instance: a wake can be stale, or
+        // another instance can consume the signal, so a short timeout re-checks the sequence.
+        const DWORD r = WaitForMultipleObjects(2, handles, FALSE, 4);
+        if (r == WAIT_OBJECT_0 + 1 || r == WAIT_FAILED) return;
+    }
+}
+
+FrameSource::FillResult FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t* uv, uint32_t uv_pitch) {
     std::lock_guard lock(mu_);
     FillResult out;
     if (width_ == 0) return out;
@@ -135,14 +166,6 @@ FrameSource::FillResult FrameSource::Fill(uint8_t* y, uint32_t y_pitch, uint8_t*
         if (agent_alive) {
             status = static_cast<shm::AgentStatus>(shm::Atomic(h->agent_status).load(std::memory_order_acquire));
             status_card = shm::Atomic(h->placeholder_mode).load(std::memory_order_relaxed) == 1;
-
-            // The agent signals FrameReady on every publish. If the newest frame is one we have
-            // already delivered, give a late frame a short window before repeating it: the sample
-            // still goes out on time, but a frame landing mid-wait is shown fresh.
-            shm::FrameInfo peek;
-            if (grace_ms && shm_.frame_ready && shm::PeekLatest(shm_.view, peek) &&
-                peek.frame_number == last_frame_number_ && peek.width == width_ && peek.height == height_)
-                WaitForSingleObject(shm_.frame_ready, grace_ms);
 
             shm::FrameInfo info;
             if (shm::ReadLatest(shm_.view, width_, height_, y, y_pitch, info)) {

@@ -16,7 +16,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 | M7 | Release v0.1 | ✅ every green main build publishes MSI + IPA as Latest; AltStore source auto-updated |
 | M8 | Backlog | ⬜ |
 | M9 | Linux host | 🟨 agent, tray, packages done and verified with fakephone; package install and real iPhone pending |
-| M10 | Under-load performance + GPU path | 🟨 verified on Linux; Windows build/tests green in CI (v0.1.12), Windows load test misses (vcam pacing, R10) |
+| M10 | Under-load performance + GPU path | ✅ Linux A/B; Windows load24 0–0.2 % frame loss through Frame Server |
 
 ## M0: Foundations
 **Goal:** a project anyone can clone, understand and build.
@@ -114,4 +114,5 @@ usbmuxd `Listen` instead of polling.
 - [x] Agent: GPU scale + letterbox (`VideoProcessorBlt` on the decode device) with the CPU path as fallback; decoded D3D11 surfaces are handed over without a download (`DecodedFrame`)
 - [x] Linux: a stall repeats the last frame (≤ 750 ms) instead of flickering black; non-blocking writes drop frames instead of stalling the session; SSE2 YUYV pack; two-thread resample; `setpriority` + `CPUWeight=500`
 - [x] Windows build, tests and MSI green in CI (v0.1.12)
-- [ ] Windows load harness (`windows\scripts\load-test.ps1`; target: ≤ 10 % frame loss at load24); the Linux A/B measured 31.3 → 34.1 fps with fewer long gaps (`docs/perf.md`)
+- [x] vcam: samples go out as soon as a new frame arrives within their interval (fixed cadence, repeat only at the interval's end); replaces the free-running timer + 2 ms grace (R10)
+- [x] Windows load harness (`windows\scripts\load-test.ps1`; target: ≤ 10 % frame loss at load24): idle 60.0 fps, load24 0–0.2 % loss (2026-10-16); the Linux A/B measured 31.3 → 34.1 fps with fewer long gaps (`docs/perf.md`)

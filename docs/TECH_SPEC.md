@@ -232,7 +232,7 @@ polls for it every 500 ms, so it's idle exactly when no consumer exists.
 | R6 iOS kills capture when the screen locks or the app is backgrounded | Video stops | Keep the screen on, dim the preview; clear "Paused on iPhone" placeholder; fast resume |
 | R8 v4l2loopback is an out-of-tree kernel module (Secure Boot signing, kernel upgrades) | Camera missing on Linux | Depend on the distro's `v4l2loopback-dkms`; the agent detects a missing `/dev/video*` loopback device and says how to fix it; document MOK enrolment for Secure Boot |
 | R9 v4l2loopback has no per-open media-type negotiation like Frame Server | Linux can't honour F5 per app | The agent picks the output format from the tray/quality setting; consumers get that size. Scaling stays in the agent |
-| R10 The vcam's free-running sample timer beats against the phone's frame cadence (both 60 Hz) | 12–30 % of frames repeated and skipped through Frame Server, even idle | **Found 2026-10-16** (perf.md). Pace `RequestSample` from frame arrival: deliver a waiting new frame at once (no faster than ~½ interval), otherwise wait on FrameReady up to ~1.5 intervals before repeating |
+| R10 The vcam's free-running sample timer beats against the phone's frame cadence (both 60 Hz) | 12–30 % of frames repeated and skipped through Frame Server, even idle | **Resolved 2026-10-16** (perf.md): each sample has a one-interval window on a fixed cadence and goes out as soon as a new frame arrives in it, repeating only at the window's end. load24 0–0.2 % loss, idle 60.0 fps |
 | R7 4K60 NV12 copy cost (~750 MB/s) | CPU/latency | Measure in M5; optimize with shared D3D11 textures (`IDXGIResource1::CreateSharedHandle`) if needed |
 
 ## 12. Open questions

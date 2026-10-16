@@ -9,7 +9,6 @@ namespace {
 
 // How long a sample waits for a frame that is landing right now, when the newest one we have was
 // already delivered. Bounded so the Frame Server's pull thread never stalls for long.
-constexpr uint32_t kLateFrameGraceMs = 2;
 
 void Trace(const char* fmt, ...) {
     char buf[256];
@@ -340,30 +339,39 @@ HRESULT MediaStream::MakeSample(ComPtr<IMFSample>& sample) {
 
 STDMETHODIMP MediaStream::RequestSample(IUnknown* token) {
     ComPtr<IMFSample> sample;
-    LONGLONG due = 0;
+    LONGLONG open = 0;
     {
         std::lock_guard lock(mu_);
         if (shutdown_) return MF_E_SHUTDOWN;
         if (state_ != MF_STREAM_STATE_RUNNING) return MF_E_MEDIA_SOURCE_WRONGSTATE;
-        due = next_due_;
+        open = window_open_;
     }
 
-    // Pace delivery to the negotiated frame rate. Frame Server asks for the next sample as soon
-    // as it has one, so without this a live source would spin.
+    // Pacing: one sample per frame interval on a fixed cadence, so the average rate is exactly the
+    // negotiated fps (Frame Server asks for the next sample as soon as it has one). Within its
+    // interval a sample goes out as soon as the agent has a frame we have not delivered, and repeats
+    // only if none arrives before the interval ends. A frame that lands a little late is shown in
+    // the next interval instead of being overwritten by its successor (repeat + skip), which is what
+    // a free-running timer did whenever its 60 Hz drifted into phase with the phone's.
     const LONGLONG interval = 10'000'000 / fps_;
     LONGLONG now = MFGetSystemTime();
-    if (due > now && timer_) {
+    if (!open || now - open > interval) open = now;  // first sample, or the consumer fell behind
+    auto arm = [this](LONGLONG wait) {
         LARGE_INTEGER rel;
-        rel.QuadPart = -(std::min)(due - now, interval);
-        SetWaitableTimer(timer_, &rel, 0, nullptr, nullptr, FALSE);
+        rel.QuadPart = -wait;
+        return SetWaitableTimer(timer_, &rel, 0, nullptr, nullptr, FALSE);
+    };
+    if (timer_ && open > now && arm((std::min)(open - now, interval))) {
         WaitForSingleObject(timer_, 100);
         now = MFGetSystemTime();
     }
+    const LONGLONG close = open + interval;
+    if (timer_ && close > now && arm(close - now)) frames_.WaitForFresh(timer_);
 
     std::lock_guard lock(mu_);
     if (shutdown_) return MF_E_SHUTDOWN;
     if (state_ != MF_STREAM_STATE_RUNNING) return MF_E_MEDIA_SOURCE_WRONGSTATE;
-    next_due_ = (due && now - due < interval) ? due + interval : now + interval;
+    window_open_ = close;
 
     HRESULT hr = MakeSample(sample);
     if (FAILED(hr)) return hr;
@@ -380,21 +388,21 @@ STDMETHODIMP MediaStream::RequestSample(IUnknown* token) {
         DWORD len = 0;
         if (FAILED(hr = b2->Lock2DSize(MF2DBuffer_LockFlags_Write, &scan0, &pitch, &start, &len))) return hr;
         if (pitch > 0 && DWORD(pitch) * height_ * 3 / 2 <= len)
-            r = frames_.Fill(scan0, DWORD(pitch), scan0 + size_t(pitch) * height_, DWORD(pitch), kLateFrameGraceMs);
+            r = frames_.Fill(scan0, DWORD(pitch), scan0 + size_t(pitch) * height_, DWORD(pitch));
         b2->Unlock2D();
     } else if (SUCCEEDED(buffer.As(&b1))) {
         BYTE* scan0 = nullptr;
         LONG pitch = 0;
         if (FAILED(hr = b1->Lock2D(&scan0, &pitch))) return hr;
         if (pitch > 0)
-            r = frames_.Fill(scan0, DWORD(pitch), scan0 + size_t(pitch) * height_, DWORD(pitch), kLateFrameGraceMs);
+            r = frames_.Fill(scan0, DWORD(pitch), scan0 + size_t(pitch) * height_, DWORD(pitch));
         b1->Unlock2D();
     } else {
         BYTE* p = nullptr;
         DWORD max = 0;
         if (FAILED(hr = buffer->Lock(&p, &max, nullptr))) return hr;
         if (max >= width_ * height_ * 3 / 2)
-            r = frames_.Fill(p, width_, p + size_t(width_) * height_, width_, kLateFrameGraceMs);
+            r = frames_.Fill(p, width_, p + size_t(width_) * height_, width_);
         buffer->Unlock();
     }
     buffer->SetCurrentLength(width_ * height_ * 3 / 2);
@@ -484,7 +492,7 @@ HRESULT MediaStream::Start(IMFMediaType* type) {
         }
     }
     state_ = MF_STREAM_STATE_RUNNING;
-    next_due_ = 0;
+    window_open_ = 0;
     frames_.Start(width_, height_, fps_);
     Trace("stream started %ux%u@%u", width_, height_, fps_);
     return queue_->QueueEventParamVar(MEStreamStarted, GUID_NULL, S_OK, nullptr);

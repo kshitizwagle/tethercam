@@ -242,8 +242,13 @@ shows black by default, or the placeholder for `agent_status` when `placeholder_
 - `MediaSource::Start` reads the consumer's chosen media type from the presentation descriptor, queues
   `MENewStream`/`MEUpdatedStream`, starts the stream (which publishes `consumer_active` and the size to
   shm and signals Control) and queues `MESourceStarted`.
-- `MediaStream::RequestSample` paces delivery to the negotiated frame rate with a high-resolution waitable
-  timer (Frame Server asks for the next sample immediately), allocates from the Frame Server allocator
+- `MediaStream::RequestSample` paces delivery (Frame Server asks for the next sample immediately): one
+  sample per frame interval on a fixed cadence, so the average rate is exactly the negotiated fps. Within
+  its interval the sample goes out as soon as the agent has published a frame this source has not
+  delivered (`FrameSource::WaitForFresh`: FrameReady or the interval's high-resolution waitable timer,
+  re-checking `PeekLatest` every 4 ms because the auto-reset event is shared by all instances), and
+  repeats the last frame only when the interval ends without one. A slightly late frame is therefore
+  shown in the next interval instead of being overwritten by its successor (R10). It allocates from the Frame Server allocator
   when one is provided (`MFSampleAllocatorUsage_UsesProvidedAllocator`), else a 2D memory buffer, fills it
   with a live frame or the placeholder, timestamps it with `MFGetSystemTime()` and queues `MEMediaSample`.
 - `Stop`/`Shutdown` clear `consumer_active`. Several consumers share one source through Frame Server
