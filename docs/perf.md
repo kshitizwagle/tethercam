@@ -2,6 +2,26 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-16: Under load, Windows host through Frame Server (fakephone)
+
+**Setup:** `windows\scripts\load-test.ps1` on the 16-thread desktop (RX 9070 XT, hardware decode), Release
+build of the M10 tree registered with `dev-install.ps1`: `fakephone --port 5321` → `tethercam-agent
+--console --tcp 127.0.0.1:5321` → Frame Server → `vcamcheck read` 1920x1080@60, idle 8 s then 24 burner
+threads for 20 s. "New fps" counts frames whose picture changed (the camera repeats the last frame when a
+new one is late, so its sample rate always reads ~60), skipping the first second as start-up.
+
+| Run | Idle new fps | load24 new fps | load24 loss | load24 gaps > 50 ms | Sample clock |
+|---|---|---|---|---|---|
+| 1 | 42.4 | 50.7 | 15.5 % | 2.6 % (longest 76 ms) | 60.0 / 60.0 |
+| 2 | 52.9 | 52.0 | 13.3 % | 2.5 % (longest 71 ms) | 60.1 / 59.6 |
+
+**Misses the M10 target** (≤ 10 % loss at load24; idle should be ~60), but not because of load: idle is
+as bad and varies run to run. The vcam log shows repeats on 10–26 % of samples at idle (in-process
+`vcamcheck direct`: ~1.5 %, 59.2 new fps, longest gap 34 ms). The vcam paces samples on its own 60 Hz
+timer, independent of frame arrival; when the two 60 Hz clocks are near phase, a few ms of arrival
+jitter beyond the 2 ms grace turns into repeat + skip pairs. Long stalls under load are rare (2.5 %
+gaps > 50 ms vs 7.0 % on Linux). Next: pace delivery from frame arrival (risk R10).
+
 ## 2026-10-16: Under load and during stalls, Linux host (fakephone)
 
 **Setup:** the M10 load harness: `fakephone --port 5321` → `tethercam-agent --tcp 127.0.0.1:5321
@@ -22,12 +42,7 @@ loopback device: the last live frame (luma 56) is held for ~0.85 s after the sou
 (luma 16) until the stall exceeds the 750 ms window; live frames resume ~0.1 s after `SIGCONT`. Before
 the change, the first 100 ms of any stall already went black.
 
-**Not re-measured:** the Windows host (FrameReady handoff, host-clock PTS, MMCSS, GPU scale) builds and
-passes its tests in CI (v0.1.12) but still needs the load harness run on the Windows boot of this PC
-(target: ≤ 10 % frame loss at load24; M10 exit criterion). The harness is one command:
-`powershell -ExecutionPolicy Bypass -File windows\scripts\load-test.ps1` (fakephone → agent →
-`vcamcheck read` through Frame Server, idle then load24; it also prints the `media thread:` and
-`GPU scale ready:` evidence lines).
+**Windows:** measured the same day, see the section above.
 
 ## 2026-10-13: Glass-to-glass latency in Streamlabs (app 0.1.10, agent 0.1.11)
 

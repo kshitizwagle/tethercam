@@ -50,11 +50,20 @@ std::wstring LogDirectory() {
     return dir;
 }
 
+// True when the parent handed us a file or pipe for this stream (e.g. a script capturing the log).
+bool Redirected(DWORD id) {
+    const HANDLE h = GetStdHandle(id);
+    if (!h || h == INVALID_HANDLE_VALUE) return false;
+    const DWORD type = GetFileType(h);
+    return type == FILE_TYPE_DISK || type == FILE_TYPE_PIPE;
+}
+
 void AttachConsoleIfAny(bool create) {
+    const bool out_redirected = Redirected(STD_OUTPUT_HANDLE), err_redirected = Redirected(STD_ERROR_HANDLE);
     if (AttachConsole(ATTACH_PARENT_PROCESS) || (create && AllocConsole())) {
         FILE* f = nullptr;
-        freopen_s(&f, "CONOUT$", "w", stdout);
-        freopen_s(&f, "CONOUT$", "w", stderr);
+        if (!out_redirected) freopen_s(&f, "CONOUT$", "w", stdout);
+        if (!err_redirected) freopen_s(&f, "CONOUT$", "w", stderr);
     }
 }
 

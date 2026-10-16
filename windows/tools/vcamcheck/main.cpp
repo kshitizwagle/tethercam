@@ -13,6 +13,7 @@
 #include <wil/resource.h>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -148,8 +149,18 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (!set) return std::printf("camera does not offer %ux%u@%u\n", w, h, fps), 5;
 
-    const auto t0 = std::chrono::steady_clock::now();
-    int got = 0;
+    // The camera repeats the last frame when a new one is late and sends black when the agent stalls,
+    // so the sample rate stays at the nominal fps either way. "New" frames are the ones whose picture
+    // changed (a hash of the middle Y row; fakephone's bars move every frame), which is what reached
+    // the app from the phone side. Counting starts 1 s after the first change, so stream start-up
+    // (decoder init, the first keyframe) is excluded.
+    using Clock = std::chrono::steady_clock;
+    constexpr auto kWarmup = std::chrono::seconds(1);
+    const auto t0 = Clock::now();
+    int got = 0, fresh = 0, long_gaps = 0;
+    uint64_t last_hash = 0;
+    Clock::time_point first_change{}, first_new{}, last_new{};
+    double worst_gap_ms = 0;
     LONGLONG first_ts = -1, last_ts = 0;
     while (got < frames) {
         DWORD stream = 0, flags = 0;
@@ -158,25 +169,45 @@ int wmain(int argc, wchar_t** argv) {
         hr = reader->ReadSample(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), 0, &stream, &flags, &ts, &sample);
         if (FAILED(hr)) return std::printf("ReadSample failed: 0x%08lx\n", hr), 6;
         if (!sample) continue;
+        const auto now = Clock::now();
         if (first_ts < 0) first_ts = ts;
         last_ts = ts;
         ++got;
-        if (got == frames && !save.empty()) {
-            wil::com_ptr<IMFMediaBuffer> buf;
-            sample->ConvertToContiguousBuffer(&buf);
-            BYTE* p = nullptr;
-            DWORD len = 0;
-            buf->Lock(&p, nullptr, &len);
+        wil::com_ptr<IMFMediaBuffer> buf;
+        sample->ConvertToContiguousBuffer(&buf);
+        BYTE* p = nullptr;
+        DWORD len = 0;
+        if (buf && SUCCEEDED(buf->Lock(&p, nullptr, &len))) {
             if (len >= w * h * 3 / 2) {
-                image::Nv12View v{p, p + size_t(w) * h, w, w, w, h};
-                std::printf("saved %s: %s\n", save.c_str(), image::SaveBmp(v, save.c_str()) ? "ok" : "failed");
+                uint64_t hash = 1469598103934665603ull;  // FNV-1a over the middle row
+                for (const BYTE* q = p + size_t(w) * (h / 2), *e = q + w; q < e; ++q) hash = (hash ^ *q) * 1099511628211ull;
+                if (got > 1 && hash != last_hash && first_change == Clock::time_point{}) first_change = now;
+                if (got > 1 && hash != last_hash && now - first_change >= kWarmup) {
+                    if (fresh++ == 0) {
+                        first_new = now;
+                    } else {
+                        const double gap = std::chrono::duration<double, std::milli>(now - last_new).count();
+                        if (gap > 50) ++long_gaps;
+                        if (gap > worst_gap_ms) worst_gap_ms = gap;
+                    }
+                    last_new = now;
+                }
+                last_hash = hash;
+                if (got == frames && !save.empty()) {
+                    image::Nv12View v{p, p + size_t(w) * h, w, w, w, h};
+                    std::printf("saved %s: %s\n", save.c_str(), image::SaveBmp(v, save.c_str()) ? "ok" : "failed");
+                }
             }
             buf->Unlock();
         }
     }
-    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    const double secs = std::chrono::duration<double>(Clock::now() - t0).count();
     std::printf("read %d frames at %ux%u in %.2f s: %.1f fps (sample clock %.1f fps)\n", got, w, h, secs, got / secs,
                 last_ts > first_ts ? (got - 1) * 1e7 / double(last_ts - first_ts) : 0.0);
+    const double span = std::chrono::duration<double>(last_new - first_new).count();
+    std::printf("new frames %d: %.1f fps, gaps > 50 ms %.1f %% (%d of %d), longest gap %.0f ms\n", fresh,
+                fresh > 1 && span > 0 ? (fresh - 1) / span : 0.0, fresh > 1 ? 100.0 * long_gaps / (fresh - 1) : 0.0,
+                long_gaps, fresh > 1 ? fresh - 1 : 0, worst_gap_ms);
     source->Shutdown();
     return 0;
 }

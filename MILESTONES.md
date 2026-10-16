@@ -16,7 +16,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 | M7 | Release v0.1 | ✅ every green main build publishes MSI + IPA as Latest; AltStore source auto-updated |
 | M8 | Backlog | ⬜ |
 | M9 | Linux host | 🟨 agent, tray, packages done and verified with fakephone; package install and real iPhone pending |
-| M10 | Under-load performance + GPU path | 🟨 verified on Linux; Windows build/tests green in CI (v0.1.12), load test pending |
+| M10 | Under-load performance + GPU path | 🟨 verified on Linux; Windows build/tests green in CI (v0.1.12), Windows load test misses (vcam pacing, R10) |
 
 ## M0: Foundations
 **Goal:** a project anyone can clone, understand and build.

@@ -100,16 +100,19 @@ build\vs2026-x64\tools\fakephone\Debug\fakephone.exe
 build\vs2026-x64\agent\Debug\tethercam-agent.exe --console --tcp 127.0.0.1:5321
 ```
 
-The under-load harness wraps exactly that and prints the M10 numbers (delivered fps, sample clock, frame
-loss) for an idle and a loaded run:
+The under-load harness wraps exactly that and prints the M10 numbers for an idle and a loaded run. The
+camera repeats the last frame (or sends black) whenever the agent is late, so the sample rate always
+reads ~60 fps; the harness therefore scores *new* frames (`vcamcheck` hashes a row of fakephone's moving
+bars), gaps > 50 ms between them, the longest gap and the sample clock:
 
 ```
 powershell -ExecutionPolicy Bypass -File windows\scripts\load-test.ps1           # load24, 20 s probes
 powershell -ExecutionPolicy Bypass -File windows\scripts\load-test.ps1 -Load 0   # idle only
 ```
 
-It tests whichever camera is registered (the MSI or `dev-install.ps1`) through Frame Server, stops any
-running agent first, and shows the agent's `media thread:` and `GPU scale ready:` lines. Record the
+It tests whichever camera DLL is registered (the MSI or `dev-install.ps1`) through Frame Server with the
+dev-tree agent, stops any running agent first, and shows the agent's `media thread:` and
+`GPU scale ready:` lines (the latter only when the consumer size differs from the phone's). Record the
 table in [perf.md](perf.md); the Windows-side checklist is [windows/scripts/LOAD-TEST.md](../windows/scripts/LOAD-TEST.md).
 
 ## Tools

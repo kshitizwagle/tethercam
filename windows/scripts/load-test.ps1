@@ -1,6 +1,8 @@
 # Runs the under-load harness on Windows and prints the M10 numbers: fakephone (the fake iPhone) ->
 # tethercam-agent -> vcamcheck read (the Media Foundation source reader, i.e. the Frame Server path
-# apps use), first idle and then with CPU burners running. Frame loss = 1 - delivered / source fps.
+# apps use), first idle and then with CPU burners running. The camera repeats the last frame (or sends
+# black) when the agent is late, so the sample rate always looks like 60 fps; frame loss is therefore
+# 1 - new frames / source fps, where "new" = the picture changed (vcamcheck's "new frames" line).
 #
 #   powershell -ExecutionPolicy Bypass -File windows\scripts\load-test.ps1
 #   powershell -ExecutionPolicy Bypass -File windows\scripts\load-test.ps1 -Load 24 -Seconds 20
@@ -9,6 +11,7 @@
 # windows\scripts\dev-install.ps1). The agent is started with --console --tcp 127.0.0.1:5321; any
 # already-running tethercam-agent is stopped first and left stopped. Load N = N CPU-bound threads
 # in a helper process; load24 on the 16-thread desktop is the M10 target (<= 10 % frame loss).
+# -Load 0 measures the idle phase only.
 param(
     [int]$Load = 24,
     [string]$Size = "1920x1080",
@@ -19,6 +22,8 @@ param(
     [switch]$SkipIdle
 )
 $ErrorActionPreference = "Stop"
+# A leftover Local namespace (vcamcheck direct testing) would hide the agent from Frame Server.
+Remove-Item Env:TETHERCAM_SHM_NAMESPACE -ErrorAction SilentlyContinue
 
 $repo = Resolve-Path "$PSScriptRoot\..\.."
 $build = Join-Path $repo "build\vs2026-x64"
@@ -41,10 +46,15 @@ foreach ($tool in @($agentExe, $fakephoneExe, $vcamcheckExe)) {
 
 function Get-Delivered($file) {
     # "read 1200 frames at 1920x1080 in 20.02 s: 59.9 fps (sample clock 60.0 fps)"
+    # "new frames 1150: 57.6 fps, gaps > 50 ms 1.2 % (14 of 1149), longest gap 83 ms"
     $text = Get-Content $file -Raw
     $m = [regex]::Match($text, '([0-9.]+) fps \(sample clock ([0-9.]+) fps\)')
-    if (-not $m.Success) { throw "cannot parse vcamcheck output in $file`n$text" }
-    return @([double]$m.Groups[1].Value, [double]$m.Groups[2].Value)
+    $n = [regex]::Match($text, 'new frames \d+: ([0-9.]+) fps, gaps > 50 ms ([0-9.]+) %.*longest gap ([0-9]+) ms')
+    if (-not $m.Success -or -not $n.Success) { throw "cannot parse vcamcheck output in $file`n$text" }
+    return [pscustomobject]@{
+        Samples = [double]$m.Groups[1].Value; Clock = [double]$m.Groups[2].Value
+        New = [double]$n.Groups[1].Value; Gaps = [double]$n.Groups[2].Value; Longest = [int]$n.Groups[3].Value
+    }
 }
 
 function Stop-Harness {
@@ -68,14 +78,16 @@ try {
     Start-Process -FilePath $agentExe -ArgumentList "--console", "--tcp", "127.0.0.1:5321" -WindowStyle Hidden `
         -RedirectStandardOutput $agentLog -RedirectStandardError $agentErr | Out-Null
 
-    $streaming = $false
+    # The phone only streams once a consumer opens the camera, so wait for the connection (the agent
+    # logs the phone's cameras) and let the first vcamcheck read start the stream.
+    $connected = $false
     for ($i = 0; $i -lt 60; $i++) {
         Start-Sleep -Milliseconds 500
-        if ((Test-Path $agentLog) -and (Select-String -Path $agentLog -Pattern "video: " -Quiet)) { $streaming = $true; break }
+        if ((Test-Path $agentErr) -and (Select-String -Path $agentErr -Pattern "camera \d+ '" -Quiet)) { $connected = $true; break }
     }
-    if (-not $streaming) {
-        Write-Host "--- agent output ---`n$(Get-Content $agentLog -Tail 15 -ErrorAction SilentlyContinue)"
-        throw "the agent never started streaming"
+    if (-not $connected) {
+        Write-Host "--- agent output ---`n$(Get-Content $agentErr -Tail 15 -ErrorAction SilentlyContinue)"
+        throw "the agent never connected to fakephone"
     }
 
     $idle = $null
@@ -111,28 +123,40 @@ Start-Sleep -Seconds 3600
         if ($burner.HasExited) { throw "the CPU burners exited early; see $outDir\burner.err" }
     }
 
-    & $vcamcheckExe read --size $Size --fps $Fps --frames ($Seconds * $Fps) | Tee-Object -FilePath (Join-Path $outDir "vcamcheck-load.txt")
-    if ($LASTEXITCODE -ne 0) { throw "load vcamcheck run failed" }
-    $under = Get-Delivered (Join-Path $outDir "vcamcheck-load.txt")
+    $under = $null
+    if ($Load -gt 0) {
+        & $vcamcheckExe read --size $Size --fps $Fps --frames ($Seconds * $Fps) | Tee-Object -FilePath (Join-Path $outDir "vcamcheck-load.txt")
+        if ($LASTEXITCODE -ne 0) { throw "load vcamcheck run failed" }
+        $under = Get-Delivered (Join-Path $outDir "vcamcheck-load.txt")
+    }
 } finally {
     if ($burner) { Stop-Process -Id $burner.Id -Force -ErrorAction SilentlyContinue }
     Stop-Harness
 }
 
-$loss = (1 - $under[0] / $Fps) * 100
+function Format-Run($label, $r) {
+    "{0,-7}: {1,5:N1} new fps, frame loss {2,5:N1} %, gaps > 50 ms {3,5:N1} %, longest {4} ms, sample clock {5:N1} fps ({6:N1} samples/s)" -f `
+        $label, $r.New, ((1 - $r.New / $Fps) * 100), $r.Gaps, $r.Longest, $r.Clock, $r.Samples
+}
 Write-Host ""
-Write-Host "=== Tethercam load test ($Size @ $Fps, load $Load, ${Seconds}s per probe) ==="
-if ($idle) { Write-Host ("idle : {0,5:N1} fps delivered, sample clock {1,5:N1} fps" -f $idle[0], $idle[1]) }
-Write-Host ("load{0}: {1,5:N1} fps delivered, sample clock {2,5:N1} fps, frame loss {3:N1} %" -f $Load, $under[0], $under[1], $loss)
+Write-Host "=== Tethercam load test ($Size @ $Fps, load $Load) ==="
+if ($idle) { Write-Host (Format-Run "idle" $idle) }
+if ($under) { Write-Host (Format-Run "load$Load" $under) }
 Write-Host ""
 Write-Host "--- agent evidence ---"
-Get-Content $agentLog -ErrorAction SilentlyContinue | Select-String -Pattern "media thread:|GPU scale ready|video: " | Select-Object -First 5 | ForEach-Object { $_.Line }
+Get-Content $agentErr -ErrorAction SilentlyContinue | Select-String -Pattern "media thread:|GPU scale ready|video: " | Select-Object -First 5 | ForEach-Object { $_.Line }
 Write-Host ""
 Write-Host "logs: $outDir   (record the table in docs/perf.md)"
 
-if ($Load -gt 0 -and $loss -gt 10) {
-    Write-Host "MISS: target is <= 10 % frame loss at load$Load"
+$fail = @()
+foreach ($r in @($idle, $under) | Where-Object { $_ }) {
+    if ([math]::Abs($r.Clock - $Fps) -gt 0.5) { $fail += "sample clock {0:N1} fps is not ~{1}" -f $r.Clock, $Fps }
+}
+if ($idle -and $idle.New -lt $Fps * 0.97) { $fail += "idle delivers {0:N1} new fps (< 97 % of {1})" -f $idle.New, $Fps }
+if ($under -and (1 - $under.New / $Fps) -gt 0.10) { $fail += "frame loss at load$Load is above 10 %" }
+if ($fail) {
+    $fail | ForEach-Object { Write-Host "MISS: $_" }
     exit 1
 }
-Write-Host "OK: within the M10 target (<= 10 % frame loss at load$Load)"
+Write-Host "OK: within the M10 target (sample clock ~$Fps, <= 10 % frame loss at load$Load)"
 exit 0
