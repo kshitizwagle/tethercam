@@ -4,7 +4,8 @@ Work from the top. Tick items in the same commit that finishes them. Milestone e
 [MILESTONES.md](MILESTONES.md).
 
 ## Next up
-- [ ] Release v0.1.14 with the M10 vcam pacing fix (v0.1.13 was tagged before it; the installed MSI is pre-M10); then the Streamlabs latency spot check with the real iPhone (perf.md, same method as 2026-10-13)
+- [x] Released v0.1.14 with the M10 vcam pacing fix (v0.1.13 was tagged before it)
+- [ ] Install the v0.1.14 MSI (`dev-install.ps1 -Uninstall` first), then the Streamlabs latency spot check with the real iPhone (perf.md, same method as 2026-10-13)
 - [ ] M9 Linux host: `sudo apt install ./linux/build/rel/Tethercam-*.deb`, log out/in, check the service + tray autostart; then a real iPhone on Linux (Q7 pairing, Firefox/Chromium/OBS/Zoom rows in compat.md)
 - [x] Synchronized quality menus on iPhone, Windows preview and tray: Auto, 1080p30/60, 4K30/60; capture overrides, persistence and capability fallback
 - [ ] Build the updated iPhone app on macOS/CI and validate quality switching on the iPhone 15 Pro Max front camera; local Swift protocol checks pass, UIKit/AVFoundation build pending
