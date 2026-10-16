@@ -110,7 +110,7 @@ powershell -ExecutionPolicy Bypass -File windows\scripts\load-test.ps1 -Load 0  
 
 It tests whichever camera is registered (the MSI or `dev-install.ps1`) through Frame Server, stops any
 running agent first, and shows the agent's `media thread:` and `GPU scale ready:` lines. Record the
-table in [perf.md](perf.md).
+table in [perf.md](perf.md); the Windows-side checklist is [windows/scripts/LOAD-TEST.md](../windows/scripts/LOAD-TEST.md).
 
 ## Tools
 
