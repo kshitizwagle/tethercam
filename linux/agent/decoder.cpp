@@ -95,6 +95,7 @@ struct H264Decoder::Impl {
     AVFrame* sw_frame = nullptr;
     AVPacket* packet = nullptr;
     bool hardware = false;
+    AVPixelFormat hw_format = AV_PIX_FMT_NONE;  // the surface format of the opened device
     std::string backend = "software";
     std::vector<HwCandidate> candidates;
     size_t next_candidate = 0;  // candidates before this one failed: never retried for this decoder
@@ -108,13 +109,16 @@ struct H264Decoder::Impl {
         av_frame_free(&sw_frame);
         av_packet_free(&packet);
         hardware = false;
+        hw_format = AV_PIX_FMT_NONE;
         backend = "software";
     }
 
     static AVPixelFormat PickFormat(AVCodecContext* c, const AVPixelFormat* fmts) {
-        const bool hw = c->hw_device_ctx != nullptr;
+        // Only the opened device's format: FFmpeg lists every hardware format the decoder supports
+        // (CUDA before VA-API), and picking one for another device type fails and logs an error.
+        const auto* self = static_cast<const Impl*>(c->opaque);
         for (const AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; ++p)
-            if (hw && IsHwFormat(*p)) return *p;
+            if (self->hw_format != AV_PIX_FMT_NONE && *p == self->hw_format) return *p;
         // No hardware surface offered (e.g. unsupported profile): take the first software format.
         for (const AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; ++p) {
             const AVPixFmtDescriptor* d = av_pix_fmt_desc_get(*p);
@@ -148,8 +152,15 @@ struct H264Decoder::Impl {
         ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
         ctx->thread_type = FF_THREAD_SLICE;
         ctx->thread_count = 0;
+        ctx->opaque = this;
         ctx->get_format = PickFormat;
         if (hw) {
+            for (int i = 0; const AVCodecHWConfig* cfg = avcodec_get_hw_config(codec, i); ++i)
+                if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && cfg->device_type == hw->type) {
+                    hw_format = cfg->pix_fmt;
+                    break;
+                }
+            if (hw_format == AV_PIX_FMT_NONE) return false;
             if (av_hwdevice_ctx_create(&hw_device, hw->type, hw->device.empty() ? nullptr : hw->device.c_str(),
                                        nullptr, 0) < 0)
                 return false;

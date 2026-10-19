@@ -2,6 +2,24 @@
 
 Record every measurement with the date, build, hardware and method. Newest first.
 
+## 2026-10-19: First Wi-Fi run, Linux host (app 0.1.15, agent 0.1.16 dev)
+
+**Setup:** iPhone 15 Pro Max, front camera, 1080p60 requested (20.4 Mbps), on 5 GHz Wi-Fi; the PC is on
+Ethernet to the same router (ping to the phone 2.9–4 ms). AMD discrete GPU, VA-API decode, preview open.
+**Method:** the agent's `--verbose` "frame lag" line: arrival time minus the phone's capture PTS, averaged
+per second, relative to the lowest value seen in the process (the two clocks differ by a fixed offset, so
+this shows queueing, not absolute latency). Throughput and fps from the Status API `detail`.
+
+| Agent build | fps | Throughput | Frame lag avg / max | Host `Recv-Q` |
+|---|---|---|---|---|
+| Debug (`-O0`) | 38 | 12.7 Mbps (flat ceiling) | sawtooth 40 → 2200 ms | 2.4–3.5 MB and growing |
+| Release | 60 | 20.2 Mbps | 3–4 ms / 13–19 ms | 0 |
+
+The lag in the Debug build was the agent's own session thread at 100 % CPU (decode, YUYV pack and preview
+scaling unoptimized): the backlog sat in the PC's socket buffer, and the phone dropped to keyframes every
+few seconds. **Measure latency with Release builds only.** Unplug → Wi-Fi took 9 ms (Avahi had already
+resolved the phone). Glass-to-glass over Wi-Fi and a USB baseline the same day are still to do.
+
 ## 2026-10-16 (2): Windows host after the vcam pacing fix (R10)
 
 Same setup as below, the vcam now delivers each sample as soon as a new frame arrives within its

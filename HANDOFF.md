@@ -24,7 +24,12 @@ What's left is the runtime and device checks below.
 - `ios/Tethercam/Net/Noise.swift` and `WifiChannel.swift` were compiled with swiftc + clang (Monocypher) on
   Windows. They pass the same vector, the record checks and the refusal checks.
 
-## Linux: still to do
+## Linux: verified with the iPhone (2026-10-19)
+Build + 52 tests with and without Avahi, USB pairing, Avahi discovery of the real phone, unplug → Wi-Fi
+in 9 ms, 1080p60 at 20 Mbps in a Release build (docs/perf.md). Still open on Linux: replug → USB, Forget,
+Wireless off, the tray Wireless submenu by eye. The notes below are the original checklist.
+
+## Linux: original checklist
 The code compiles and its tests pass in CI, but the agent has never been run on Linux. The Linux side shares `common/` (noise, link, pairing) with Windows,
 so most risk is in the Linux-only files.
 

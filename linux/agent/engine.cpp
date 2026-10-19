@@ -404,6 +404,7 @@ void Engine::RunSession(Link& link) {
     auto consumer_gone_since = Clock::time_point{};
     auto window_start = Clock::now();
     uint64_t window_bytes = 0, window_frames = 0;
+    int64_t lag_sum_us = 0, lag_max_us = INT64_MIN;
 
     auto choose_camera = [&]() -> const proto::Camera* {
         std::lock_guard lock(mu_);
@@ -513,6 +514,11 @@ void Engine::RunSession(Link& link) {
             } else if (auto vf = std::get_if<proto::VideoFrame>(&m)) {
                 ++window_frames;
                 window_bytes += vf->data.size();
+                const int64_t lag = std::chrono::duration_cast<std::chrono::microseconds>(
+                                        Clock::now().time_since_epoch()).count() - int64_t(vf->pts_us);
+                if (lag < lag_floor_us_) lag_floor_us_ = lag;
+                lag_sum_us += lag;
+                lag_max_us = std::max(lag_max_us, lag);
                 if (!decoder_ready || !streaming) continue;
                 if (waiting_for_key && !vf->IsKeyframe()) continue;
                 waiting_for_key = false;
@@ -674,8 +680,14 @@ void Engine::RunSession(Link& link) {
                 snap_.fps = live ? static_cast<uint32_t>(window_frames / dt + 0.5) : 0;
             }
             SetStatus(st, detail);
+            if (window_frames)
+                log::Debug("frame lag over {}: avg {:.1f} ms, max {:.1f} ms (relative to the lowest seen)",
+                           wifi ? "Wi-Fi" : "USB", (lag_sum_us / double(window_frames) - lag_floor_us_) / 1000,
+                           (lag_max_us - lag_floor_us_) / 1000.0);
             window_start = now;
             window_bytes = window_frames = 0;
+            lag_sum_us = 0;
+            lag_max_us = INT64_MIN;
         }
     }
     if (streaming) send(proto::Stop{});

@@ -102,6 +102,9 @@ private:
     std::string link_serial_;                     // USB serial of the current plain link
     std::chrono::steady_clock::time_point last_wifi_try_{};
     std::string last_wifi_warning_;
+    // Smallest (arrival - pts) seen in this process: frame lag is logged relative to it, so USB and Wi-Fi
+    // sessions are comparable (the phone's capture clock and ours differ by a fixed offset).
+    int64_t lag_floor_us_ = INT64_MAX;
 
     V4l2Output out_;
     std::chrono::steady_clock::time_point last_write_{}, last_any_write_{}, last_scan_{}, last_open_try_{};

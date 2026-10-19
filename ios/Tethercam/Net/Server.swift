@@ -114,6 +114,9 @@ final class Server: @unchecked Sendable {
         params.allowLocalEndpointReuse = true
         params.prohibitedInterfaceTypes = [.cellular]  // local network only
         params.includePeerToPeer = false
+        // WMM video access category: the radio queues these packets ahead of best-effort traffic.
+        // Accepted connections inherit the listener's parameters.
+        params.serviceClass = .interactiveVideo
         if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options { tcp.noDelay = true }
         do {
             let l = try NWListener(using: params, on: NWEndpoint.Port(rawValue: Wire.wifiPort)!)

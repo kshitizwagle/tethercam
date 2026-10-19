@@ -71,8 +71,7 @@ set(CPACK_DEBIAN_PACKAGE_LICENSE GPL-3.0)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "v4l2loopback-dkms | v4l2loopback-modules, usbmuxd, kmod")
 # Wi-Fi discovery talks to avahi-daemon (libavahi-client comes in through shlibdeps).
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "avahi-daemon")
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "va-driver-all, gnome-shell-extension-appindicator | plasma-workspace")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "avahi-daemon, va-driver-all, gnome-shell-extension-appindicator | plasma-workspace")
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/deb/postinst;${CMAKE_CURRENT_BINARY_DIR}/deb/prerm")
 set(CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION ON)
 
@@ -82,6 +81,7 @@ set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 set(CPACK_RPM_PACKAGE_AUTOREQ ON)
 # Fedora: v4l2loopback is in RPM Fusion (akmod), as is an FFmpeg with the H.264 decoder.
 set(CPACK_RPM_PACKAGE_REQUIRES "v4l2loopback, usbmuxd, kmod")
+set(CPACK_RPM_PACKAGE_RECOMMENDS "avahi")
 set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE ${PKG}/postinst.sh)
 set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE ${PKG}/prerm.sh)
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
