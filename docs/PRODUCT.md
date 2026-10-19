@@ -11,8 +11,9 @@ Using a phone you already own as a camera should be a basic, free feature.
 
 ## Product statement
 
-Tethercam turns an iPhone into a standard Windows or Linux webcam over a USB cable, at the highest video
-resolution the phone can stream, with as little setup and UI as possible. It's free and GPL-3.0.
+Tethercam turns an iPhone into a standard Windows or Linux webcam over a USB cable or, once paired, the
+local Wi-Fi network, at the highest video resolution the phone can stream, with as little setup and UI as
+possible. It's free and GPL-3.0.
 
 ## Users
 
@@ -23,18 +24,21 @@ resolution the phone can stream, with as little setup and UI as possible. It's f
 
 ## Goals (v1)
 
-1. **Wired only.** USB cable, through Apple's own USB driver. Reliable and low latency, with no
-   pairing over the network.
+1. **Wired first, wireless when wanted.** USB through Apple's own USB driver is the default: reliable,
+   low latency, nothing to set up. Wi-Fi (M11) is opt-in on the phone and pairs automatically the first
+   time the phone is connected by cable to that PC, with no codes to type. It's encrypted end to end and
+   limited to the local network. A plugged-in cable always wins.
 2. **Full resolution.** Expose every video format the phone's camera can stream, up to 3840×2160 at
    60 fps, as standard webcam formats.
 3. **Just a webcam.** It shows up as "Tethercam" in every app that lists cameras. No per-app plugins.
 4. **Small UI.** iPhone: preview, lens picker, status. Windows: tray icon showing the connection state,
    plus a few settings.
-5. **Respect the user.** No account, no telemetry, no watermark, no ads, no network access.
+5. **Respect the user.** No account, no telemetry, no watermark, no ads, no internet access. Wi-Fi
+   traffic stays between the phone and PCs the user paired.
 
 ## Non-goals (v1)
 
-- Wi-Fi or any other wireless connection
+- Streaming over the internet, through a relay server or a cloud account; Bluetooth
 - Overlays, backgrounds, filters, beauty effects, virtual backgrounds
 - Audio (iPhone as a microphone). Planned for after v1.
 - Windows 10 (no virtual camera API). A DirectShow fallback might come later.
@@ -51,6 +55,9 @@ resolution the phone can stream, with as little setup and UI as possible. It's f
 - *As any user*, if I unplug the phone, apps keep the camera open and show a "Connect your iPhone"
   placeholder. Plugging back in resumes the video within 3 seconds.
 - *As any user*, I can mount the phone in landscape or portrait and the picture stays the right way up.
+- *As a user who'd rather not keep the phone plugged in* (M11), I turn on Wireless in the phone app and
+  connect the cable once. From then on Tethercam connects to that PC over Wi-Fi whenever the app is open
+  and no cable is plugged in.
 
 ## User experience flow
 
@@ -60,10 +67,15 @@ resolution the phone can stream, with as little setup and UI as possible. It's f
    Computer" the first time the cable is connected.
 3. **Every day:** plug in → open Tethercam on the phone (the screen stays on and dims to save power) → the
    tray icon turns green → choose "Tethercam" in your video app.
+4. **Wireless (M11, optional):** turn on Wireless in the phone app (iOS asks for Local Network access) →
+   connect the phone by USB once with the app open: it pairs with that PC on its own → unplug. After that
+   the phone connects over Wi-Fi. Pairing happens once per PC; a new PC needs one cable connection.
 
 ### Windows tray menu
 
-- Status line: `Connected: <device name>, 1920×1080 @ 30 fps` / `Waiting for iPhone` / error text
+- Status line: `Connected: <device name>, 1920×1080 @ 30 fps` (`over Wi-Fi` when wireless) /
+  `Waiting for iPhone` / error text
+- Wireless: paired iPhone, its address (editable, for networks that block discovery), Forget (M11)
 - Show preview (also: click the icon): live video window; keeps the iPhone streaming while open
 - Lens: Wide / Ultra Wide / Telephoto / Front (only the lenses the phone has)
 - Mirror preview (front camera) · Rotate
@@ -74,12 +86,14 @@ resolution the phone can stream, with as little setup and UI as possible. It's f
 
 - Full-screen camera preview with a status pill (`Waiting for PC` / `Streaming 4K30 · 45 Mbps`)
 - Lens switcher, preview dim/blank toggle (saves battery and heat)
+- Wireless toggle (off by default) and the list of paired PCs with Forget (M11)
 - No settings screens in v1 beyond these
 
 ## Success metrics
 
 - Works in the Windows Camera app, Teams, Zoom, OBS, Chrome and Edge.
-- Glass-to-glass latency: < 100 ms at 1080p30, < 150 ms at 4K30.
+- Glass-to-glass latency: < 100 ms at 1080p30, < 150 ms at 4K30 (USB). Over 5 GHz Wi-Fi: < 150 ms at
+  1080p30 (target, to be measured in M11).
 - Reconnects within 3 s after replug or phone unlock.
 - 1-hour session at 1080p30 with no dropped connection and no growth in agent memory.
 - Install to first frame in under 5 minutes for a new user following the README.

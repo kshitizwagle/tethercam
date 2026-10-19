@@ -27,6 +27,8 @@ uint8_t TypeOf(const Message& msg) {
                           [](const Heartbeat&) { return uint8_t(MsgType::Heartbeat); },
                           [](const Status&) { return uint8_t(MsgType::Status); },
                           [](const Error&) { return uint8_t(MsgType::Error); },
+                          [](const WifiPair&) { return uint8_t(MsgType::WifiPair); },
+                          [](const WifiPaired&) { return uint8_t(MsgType::WifiPaired); },
                           [](const Unknown& u) { return u.type; },
                       },
                       msg);
@@ -100,6 +102,18 @@ void WritePayload(ByteWriter& w, const Message& msg) {
                    [&](const Error& m) {
                        w.U16(uint16_t(m.code));
                        w.Str(m.message);
+                   },
+                   [&](const WifiPair& m) {
+                       w.Bytes(m.host_id);
+                       w.Bytes(m.key);
+                       w.Str(m.name);
+                   },
+                   [&](const WifiPaired& m) {
+                       w.U8(uint8_t(m.status));
+                       w.Bytes(m.device_id);
+                       w.Str(m.name);
+                       w.U16(m.port);
+                       w.Str(m.address);
                    },
                    [&](const Unknown&) {},
                },
@@ -242,6 +256,27 @@ std::optional<Message> DecodePayload(uint8_t type, std::span<const uint8_t> payl
         out = std::move(m);
         break;
     }
+    case MsgType::WifiPair: {
+        WifiPair m;
+        auto id = r.Bytes(m.host_id.size());
+        if (!id.empty()) std::memcpy(m.host_id.data(), id.data(), id.size());
+        auto key = r.Bytes(m.key.size());
+        if (!key.empty()) std::memcpy(m.key.data(), key.data(), key.size());
+        m.name = r.Str();
+        out = std::move(m);
+        break;
+    }
+    case MsgType::WifiPaired: {
+        WifiPaired m;
+        m.status = WifiPairStatus(r.U8());
+        auto id = r.Bytes(m.device_id.size());
+        if (!id.empty()) std::memcpy(m.device_id.data(), id.data(), id.size());
+        m.name = r.Str();
+        m.port = r.U16();
+        m.address = r.Str();
+        out = std::move(m);
+        break;
+    }
     default:
         return Unknown{type};
     }
@@ -277,7 +312,8 @@ StreamParser::Result StreamParser::Next(Message& out) {
 const char* TypeName(const Message& msg) {
     static constexpr const char* kNames[] = {
         "Hello",       "Caps",       "SetCamera", "SetFormat", "Start", "Stop",  "RequestKeyframe",
-        "SetOptions", "SetQuality", "VideoConfig", "VideoFrame", "Heartbeat", "Status", "Error", "Unknown"};
+        "SetOptions", "SetQuality", "VideoConfig", "VideoFrame", "Heartbeat", "Status", "Error", "WifiPair",
+        "WifiPaired", "Unknown"};
     return kNames[msg.index()];
 }
 

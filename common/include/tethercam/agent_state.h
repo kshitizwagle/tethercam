@@ -46,6 +46,9 @@ struct Snapshot {
     int thermal = -1;   // iPhone thermal state 0 nominal .. 3 critical, -1 unknown
     int battery = -1;   // iPhone battery percent, -1 unknown
     bool charging = false;
+    std::string transport;     // "usb" or "wifi" while connected, empty otherwise
+    std::string wifi_phone;    // name of the most recently paired Wi-Fi phone, empty if none
+    std::string wifi_address;  // its manual address, else the address it reported over USB
 };
 
 // Machine-readable status for the local status API (docs/STATUS_API.md).

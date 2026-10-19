@@ -13,14 +13,20 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""   # set your own team locally; never commit it
     TARGETED_DEVICE_FAMILY: "1,2"
+    # Monocypher (vendored C, Wi-Fi transport crypto) reaches Swift through the bridging header.
+    HEADER_SEARCH_PATHS: $(SRCROOT)/../third_party/monocypher
 targets:
   Tethercam:
     type: application
     platform: iOS
-    sources: [Tethercam]
+    sources:
+      - Tethercam
+      - path: ../third_party/monocypher
+        excludes: ["*.md"]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.tethercam.app
+        SWIFT_OBJC_BRIDGING_HEADER: Tethercam/Tethercam-Bridging-Header.h
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Tethercam/Info.plist
@@ -28,7 +34,9 @@ targets:
         CFBundleDisplayName: Tethercam
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        NSCameraUsageDescription: Tethercam streams your camera to your PC over the USB cable.
+        NSCameraUsageDescription: Tethercam streams your camera to your PC over the USB cable, or over Wi-Fi to PCs you paired.
+        NSLocalNetworkUsageDescription: With Wireless on, Tethercam lets PCs you paired over USB find your iPhone and receive its camera over Wi-Fi.
+        NSBonjourServices: [_tethercam._tcp]
         UILaunchScreen: {}
         UIRequiresFullScreen: true
         UIStatusBarHidden: true

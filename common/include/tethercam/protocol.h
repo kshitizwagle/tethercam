@@ -4,6 +4,7 @@
 // keep the two in sync (golden vectors live in docs/protocol-vectors/).
 
 #include <cstdint>
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -17,6 +18,7 @@ inline constexpr uint8_t kVersion = 1;
 inline constexpr size_t kHeaderSize = 12;
 inline constexpr uint32_t kMaxPayload = 16u * 1024 * 1024;
 inline constexpr uint16_t kDevicePort = 5321;
+inline constexpr uint16_t kWifiPort = 5322;  // encrypted Wi-Fi transport (docs/PROTOCOL.md)
 
 enum class MsgType : uint8_t {
     Hello = 0x01,
@@ -32,6 +34,8 @@ enum class MsgType : uint8_t {
     VideoFrame = 0x21,
     Heartbeat = 0x30,
     Status = 0x31,
+    WifiPair = 0x40,    // host -> device, over USB only
+    WifiPaired = 0x41,  // device -> host, over USB only
     Error = 0x7F,
 };
 
@@ -133,6 +137,23 @@ struct Error {
     std::string message;
 };
 
+// Wi-Fi pairing over the trusted USB link (M11): the host hands the phone a key for later Wi-Fi sessions.
+struct WifiPair {
+    std::array<uint8_t, 16> host_id{};
+    std::array<uint8_t, 32> key{};
+    std::string name;
+};
+
+enum class WifiPairStatus : uint8_t { Paired = 0, WirelessOff = 1 };
+
+struct WifiPaired {
+    WifiPairStatus status = WifiPairStatus::Paired;
+    std::array<uint8_t, 16> device_id{};
+    std::string name;
+    uint16_t port = kWifiPort;
+    std::string address;  // current Wi-Fi address, empty if unknown
+};
+
 // A message of a type this build doesn't know. Kept so callers can log and ignore it.
 struct Unknown {
     uint8_t type = 0;
@@ -142,7 +163,7 @@ enum class Quality : uint8_t { Auto = 0, HD30 = 1, HD60 = 2, UHD30 = 3, UHD60 = 
 struct SetQuality { Quality quality = Quality::Auto; };
 
 using Message = std::variant<Hello, Caps, SetCamera, SetFormat, Start, Stop, RequestKeyframe, SetOptions, SetQuality,
-                             VideoConfig, VideoFrame, Heartbeat, Status, Error, Unknown>;
+                             VideoConfig, VideoFrame, Heartbeat, Status, Error, WifiPair, WifiPaired, Unknown>;
 
 // Serializes a full frame (header + payload).
 std::vector<uint8_t> Encode(const Message& msg);

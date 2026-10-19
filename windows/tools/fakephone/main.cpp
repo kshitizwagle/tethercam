@@ -1,15 +1,22 @@
 // fakephone: plays the device side of the Tethercam protocol over plain TCP, streaming an
 // H.264-encoded test pattern. Lets the agent and virtual camera be developed without an iPhone.
 //
-//   fakephone [--port 5321] [--max WxH]
+//   fakephone [--port 5321] [--max WxH] [--wifi-port 5322] [--wireless-off] [--advertise]
 //
 // Builds on Windows (Media Foundation encoder) and Linux (FFmpeg encoder, linux/agent/encoder.h).
 //
 // Connect with:  tethercam-agent --tcp 127.0.0.1:5321   or   tcprobe stream --tcp 127.0.0.1:5321
+//
+// Wi-Fi (M11): the plain port stands in for USB and answers WifiPair; the Wi-Fi port (0 = off) speaks
+// the encrypted transport to hosts paired that way. --advertise publishes _tethercam._tcp (Windows).
+// A new connection on either port replaces the current session, as on the iPhone.
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -22,14 +29,30 @@
 #else
 #include "encoder.h"  // linux/agent: FFmpeg encoder with the same interface
 #endif
+#include "tethercam/link.h"
 #include "tethercam/net.h"
+#include "tethercam/pairing.h"
 #include "tethercam/protocol.h"
 #include "tethercam/version.h"
+#ifdef _WIN32
+#include <windns.h>
+#endif
 
 using namespace tethercam;
 using Clock = std::chrono::steady_clock;
 
 namespace {
+
+// What the phone remembers about paired hosts (in memory: a fresh fakephone starts unpaired).
+struct Pairings {
+    std::mutex mu;
+    std::map<wifi::HostId, wifi::PairKey> keys;
+    wifi::DeviceId device_id{};
+    bool wireless_on = true;
+    uint16_t wifi_port = proto::kWifiPort;
+};
+
+std::atomic<uint64_t> g_generation{0};
 
 uint64_t NowUs() {
     return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count());
@@ -59,7 +82,8 @@ proto::Caps MakeCaps(uint32_t max_w, uint32_t max_h) {
 
 class Session {
 public:
-    Session(net::Socket s, proto::Caps caps) : sock_(std::move(s)), caps_(std::move(caps)) {}
+    Session(std::unique_ptr<Link> link, proto::Caps caps, Pairings& pairings, uint64_t generation)
+        : link_(std::move(link)), caps_(std::move(caps)), pairings_(pairings), generation_(generation) {}
 
     void Run() {
         proto::Hello hello;
@@ -75,15 +99,19 @@ public:
         auto last_status = Clock::now();
         uint64_t window_bytes = 0, window_frames = 0;
         for (;;) {
-            int timeout = 1000;
+            if (g_generation != generation_) {
+                log::Info("replaced by a new connection");
+                return;
+            }
+            int timeout = 100;
             if (streaming_) {
                 const auto wait = std::chrono::duration_cast<std::chrono::milliseconds>(next_frame - Clock::now());
-                timeout = static_cast<int>(std::max<int64_t>(0, wait.count()));
+                timeout = static_cast<int>(std::clamp<int64_t>(wait.count(), 0, 100));
             }
-            const int r = sock_.WaitReadable(timeout);
+            const int r = link_->WaitReadable(timeout);
             if (r < 0) return;
             if (r > 0) {
-                const int n = sock_.RecvSome(buf);
+                const int n = link_->RecvSome(buf);
                 if (n <= 0) {
                     log::Info("host disconnected");
                     return;
@@ -128,7 +156,7 @@ public:
     }
 
 private:
-    bool Send(const proto::Message& m) { return sock_.SendAll(proto::Encode(m)); }
+    bool Send(const proto::Message& m) { return link_->SendAll(proto::Encode(m)); }
 
     bool Handle(const proto::Message& m) {
         if (auto h = std::get_if<proto::Hello>(&m)) {
@@ -153,6 +181,20 @@ private:
             force_key_ = true;
         } else if (auto o = std::get_if<proto::SetOptions>(&m)) {
             log::Info("options: mirror={} rotation={}", o->mirror, o->rotation);
+        } else if (auto p = std::get_if<proto::WifiPair>(&m)) {
+            if (link_->Encrypted()) return true;  // pairing only over the "USB" link
+            proto::WifiPaired reply;
+            {
+                std::lock_guard lock(pairings_.mu);
+                reply.device_id = pairings_.device_id;
+                reply.port = pairings_.wifi_port;
+                if (pairings_.wireless_on && pairings_.wifi_port) pairings_.keys[p->host_id] = p->key;
+                else reply.status = proto::WifiPairStatus::WirelessOff;
+            }
+            reply.name = "fakephone";
+            reply.address = "127.0.0.1";
+            log::Info("WifiPair from {}: {}", p->name, reply.status == proto::WifiPairStatus::Paired ? "paired" : "wireless off");
+            return Send(reply);
         }
         return true;
     }
@@ -206,8 +248,10 @@ private:
         return sent;
     }
 
-    net::Socket sock_;
+    std::unique_ptr<Link> link_;
     proto::Caps caps_;
+    Pairings& pairings_;
+    uint64_t generation_;
     proto::StreamParser parser_;
     media::H264Encoder encoder_;
     image::Nv12Frame frame_;
@@ -222,16 +266,49 @@ private:
     std::vector<uint8_t> last_ps_;
 };
 
+#ifdef _WIN32
+// Publishes the Wi-Fi port over Bonjour through the OS resolver, like the iPhone app does.
+void Advertise(const wifi::DeviceId& id, uint16_t port) {
+    static DNS_SERVICE_CANCEL cancel{};
+    wchar_t host[256];
+    DWORD n = 256;
+    GetComputerNameExW(ComputerNamePhysicalDnsHostname, host, &n);
+    const std::wstring hostname = std::wstring(host) + L".local";
+    const std::string hex = wifi::Hex(id);
+    const std::wstring idw(hex.begin(), hex.end());
+    PCWSTR keys[] = {L"v", L"id"};
+    PCWSTR values[] = {L"1", idw.c_str()};
+    PDNS_SERVICE_INSTANCE inst = DnsServiceConstructInstance(L"fakephone._tethercam._tcp.local", hostname.c_str(), nullptr,
+                                                              nullptr, port, 0, 0, 2, keys, values);
+    DNS_SERVICE_REGISTER_REQUEST req{};
+    req.Version = DNS_QUERY_REQUEST_VERSION1;
+    req.pServiceInstance = inst;
+    req.pRegisterCompletionCallback = [](DWORD status, PVOID, PDNS_SERVICE_INSTANCE i) {
+        log::Info("Bonjour advert: {}", status == ERROR_SUCCESS ? "registered" : "failed " + std::to_string(status));
+        if (i) DnsServiceFreeInstance(i);
+    };
+    const DWORD st = DnsServiceRegister(&req, &cancel);
+    if (st != DNS_REQUEST_PENDING) log::Warn("DnsServiceRegister failed: {}", st);
+    DnsServiceFreeInstance(inst);
+}
+#endif
+
 }  // namespace
 
 int main(int argc, char** argv) {
     uint16_t port = proto::kDevicePort;
     uint32_t max_w = 3840, max_h = 2160;
+    bool advertise = false;
+    Pairings pairings;
     for (int i = 1; i < argc; ++i) {
         std::string k = argv[i];
         if (k == "--port" && i + 1 < argc) port = static_cast<uint16_t>(std::atoi(argv[++i]));
         else if (k == "--max" && i + 1 < argc) std::sscanf(argv[++i], "%ux%u", &max_w, &max_h);
+        else if (k == "--wifi-port" && i + 1 < argc) pairings.wifi_port = static_cast<uint16_t>(std::atoi(argv[++i]));
+        else if (k == "--wireless-off") pairings.wireless_on = false;
+        else if (k == "--advertise") advertise = true;
     }
+    noise::RandomBytes(pairings.device_id);
 #ifdef _WIN32
     media::MfScope mf;
     if (!mf.Ok()) return std::fprintf(stderr, "Media Foundation unavailable\n"), 1;
@@ -240,11 +317,61 @@ int main(int argc, char** argv) {
     if (!listener.Valid()) return std::fprintf(stderr, "cannot listen on 127.0.0.1:%u\n", port), 1;
     log::Info("fakephone {} listening on 127.0.0.1:{}", Version(), port);
     const auto caps = MakeCaps(max_w, max_h);
+
+    std::thread wifi_thread;
+    net::Socket wifi_listener;
+    if (pairings.wireless_on && pairings.wifi_port) {
+        wifi_listener = net::ListenTcp("127.0.0.1", pairings.wifi_port);
+        if (!wifi_listener.Valid())
+            return std::fprintf(stderr, "cannot listen on 127.0.0.1:%u\n", pairings.wifi_port), 1;
+        log::Info("Wi-Fi transport on 127.0.0.1:{} (device id {})", pairings.wifi_port, wifi::Hex(pairings.device_id));
+#ifdef _WIN32
+        if (advertise) Advertise(pairings.device_id, pairings.wifi_port);
+#else
+        if (advertise) log::Warn("--advertise is only implemented on Windows");
+#endif
+        wifi_thread = std::thread([&] {
+#ifdef _WIN32
+            media::MfScope thread_mf;
+#endif
+            for (;;) {
+                auto client = net::Accept(wifi_listener);
+                if (!client.Valid()) continue;
+                client.SetNoDelay();
+                auto link = wifi::AcceptDevice(std::move(client), [&](const wifi::HostId& host) -> std::optional<wifi::PairKey> {
+                    std::lock_guard lock(pairings.mu);
+                    const auto it = pairings.keys.find(host);
+                    if (it == pairings.keys.end()) return std::nullopt;
+                    return it->second;
+                });
+                if (!link) {
+                    log::Warn("Wi-Fi connection refused (unknown host or failed handshake)");
+                    continue;
+                }
+                log::Info("host connected over Wi-Fi");
+                std::thread(
+                    [l = std::move(link), &caps, &pairings, gen = ++g_generation]() mutable {
+#ifdef _WIN32
+                        media::MfScope session_mf;
+#endif
+                        Session(std::move(l), caps, pairings, gen).Run();
+                    })
+                    .detach();
+            }
+        });
+    }
     for (;;) {
         auto client = net::Accept(listener);
         if (!client.Valid()) continue;
         client.SetNoDelay();
         log::Info("host connected");
-        Session(std::move(client), caps).Run();
+        std::thread(
+            [l = std::make_unique<PlainLink>(std::move(client)), &caps, &pairings, gen = ++g_generation]() mutable {
+#ifdef _WIN32
+                media::MfScope session_mf;
+#endif
+                Session(std::move(l), caps, pairings, gen).Run();
+            })
+            .detach();
     }
 }

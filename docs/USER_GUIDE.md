@@ -1,8 +1,9 @@
 # Tethercam user guide
 
 Tethercam turns your iPhone into a webcam for Windows 11 or Linux over a USB cable. Video apps see it as a normal
-camera called **Tethercam (Windows Virtual Camera)**. Nothing goes over Wi-Fi or the internet: the video
-travels through the cable only.
+camera called **Tethercam (Windows Virtual Camera)**. The video travels through the cable; if you turn on
+**Wireless** in the iPhone app, it can also go over your local Wi-Fi to PCs you paired with the cable.
+Nothing goes to the internet.
 
 - [What you need](#what-you-need)
 - [Install](#install)
@@ -224,8 +225,15 @@ Logs: tray → **Open log folder** (`%LOCALAPPDATA%\Tethercam\logs\agent.log`).
 
 ## FAQ
 
-**Does it work over Wi-Fi?** No, by design: USB only. It's more reliable, has lower latency and keeps
-the phone charged.
+**Does it work over Wi-Fi?** Yes, optionally (new; not yet verified with a real iPhone, so treat it as
+beta). In the iPhone app tap the Wi-Fi button at the top, turn on **Wireless** and allow Local Network
+access, then connect the phone to the PC with the cable once while Tethercam is open: the PC pairs on its
+own. From then on, whenever the cable is unplugged and both are on the same network, the PC connects over
+Wi-Fi (the tray shows "(Wi-Fi)"). Plugging the cable back in switches to USB. Over Wi-Fi, Auto quality
+stays at 1080p; pick 4K explicitly if your network keeps up. The video is encrypted and only goes to PCs
+paired with the cable. If the PC can't find the phone (some networks block discovery), set its address
+under tray → **Wireless → Address**. **Forget Wi-Fi pairing** in the tray, or **Forget** in the iPhone
+app, removes a pairing. A cable is still faster, more reliable and keeps the phone charged.
 
 **Does it send anything to the internet?** No. The PC talks to the phone through Apple's local USB
 service, and the iPhone app only accepts connections from that cable.

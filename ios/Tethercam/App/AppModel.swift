@@ -10,6 +10,8 @@ final class AppModel: ObservableObject {
     @Published var mirrored = false
     @Published var dimmed = false
     @Published var quality: CaptureQuality = .auto
+    @Published var wireless = false
+    @Published var pairedHosts: [WifiPairings.Host] = []
     @Published var permission: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     /// Rotation for icons and labels so they stay upright while the UI is locked to portrait,
     /// like the Camera app.
@@ -66,6 +68,9 @@ final class AppModel: ObservableObject {
             if dim { self?.dimmed = true }
         }
         session.onRemoteMirror = { [weak self] on in self?.mirrored = on }
+        wireless = session.initialWireless
+        pairedHosts = session.pairings.all
+        session.onPairingsChange = { [weak self] hosts in self?.pairedHosts = hosts }
         session.selectCamera(selectedCamera)
         session.start()
     }
@@ -117,9 +122,22 @@ final class AppModel: ObservableObject {
         session.selectQuality(value)
     }
 
+    // MARK: Wireless
+
+    func setWireless(_ on: Bool) {
+        wireless = on
+        session.setWireless(on)
+    }
+
+    func forget(_ host: WifiPairings.Host) {
+        pairedHosts.removeAll { $0.hostId == host.hostId }
+        session.forgetHost(host.hostId)
+    }
+
     var liveText: String {
-        guard stats.streaming else { return stats.connected ? "Connected" : stats.message }
+        let wifi = stats.transport == "Wi-Fi"
+        guard stats.streaming else { return stats.connected ? (wifi ? "Connected · Wi-Fi" : "Connected") : stats.message }
         let res = stats.height >= 2160 ? "4K" : "\(stats.height)p"
-        return String(format: "%@ %.0f · %.1f Mbps", res, stats.fps, stats.mbps)
+        return String(format: "%@ %.0f · %.1f Mbps", res, stats.fps, stats.mbps) + (wifi ? " · Wi-Fi" : "")
     }
 }

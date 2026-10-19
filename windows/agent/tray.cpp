@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <vector>
 
 #include "tethercam/version.h"
 
@@ -25,6 +26,8 @@ enum MenuId : UINT {
     kRotate90,
     kRotate180,
     kRotate270,
+    kWifiAddress,
+    kWifiForget,
     kCameraBase = 200,
     kQualityBase = 500,
 };
@@ -36,6 +39,85 @@ std::wstring Widen(const std::string& s) {
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), w.data(), n);
     return w;
 }
+
+std::string Narrow(const std::wstring& w) {
+    if (w.empty()) return {};
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), nullptr, 0, nullptr, nullptr);
+    std::string s(size_t(n), ' ');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+// A one-line text prompt built from an in-memory dialog template (the agent has no .rc dialogs).
+class TextPrompt {
+public:
+    static bool Ask(HWND owner, const wchar_t* title, const wchar_t* prompt, std::wstring& value) {
+        TextPrompt self;
+        self.value = &value;
+        std::vector<WORD> t;
+        auto align = [&] {
+            if (t.size() % 2) t.push_back(0);  // DLGITEMTEMPLATEs start on DWORD boundaries
+        };
+        auto str = [&](const wchar_t* s) {
+            for (; *s; ++s) t.push_back(WORD(*s));
+            t.push_back(0);
+        };
+        auto dword = [&](DWORD v) {
+            t.push_back(LOWORD(v));
+            t.push_back(HIWORD(v));
+        };
+        auto item = [&](DWORD style, short x, short y, short cx, short cy, WORD id, WORD cls, const wchar_t* text) {
+            align();
+            dword(style | WS_CHILD | WS_VISIBLE);
+            dword(0);
+            for (short v : {x, y, cx, cy}) t.push_back(WORD(v));
+            t.push_back(id);
+            t.push_back(0xFFFF);
+            t.push_back(cls);
+            str(text);
+            t.push_back(0);  // no creation data
+        };
+        dword(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        dword(0);
+        t.push_back(4);  // items
+        for (short v : {short(0), short(0), short(240), short(70)}) t.push_back(WORD(v));
+        t.push_back(0);  // no menu
+        t.push_back(0);  // default class
+        str(title);
+        t.push_back(9);
+        str(L"Segoe UI");
+        item(SS_LEFT, 8, 8, 224, 18, 100, 0x0082, prompt);
+        item(ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 8, 28, 224, 14, 101, 0x0081, L"");
+        item(BS_DEFPUSHBUTTON | WS_TABSTOP, 126, 50, 50, 14, IDOK, 0x0080, L"OK");
+        item(BS_PUSHBUTTON | WS_TABSTOP, 182, 50, 50, 14, IDCANCEL, 0x0080, L"Cancel");
+        return DialogBoxIndirectParamW(GetModuleHandleW(nullptr), reinterpret_cast<LPCDLGTEMPLATEW>(t.data()), owner,
+                                       &TextPrompt::Proc, reinterpret_cast<LPARAM>(&self)) == IDOK;
+    }
+
+private:
+    std::wstring* value = nullptr;
+
+    static INT_PTR CALLBACK Proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
+        auto* self = reinterpret_cast<TextPrompt*>(GetWindowLongPtrW(dlg, DWLP_USER));
+        if (msg == WM_INITDIALOG) {
+            SetWindowLongPtrW(dlg, DWLP_USER, lp);
+            self = reinterpret_cast<TextPrompt*>(lp);
+            SetDlgItemTextW(dlg, 101, self->value->c_str());
+            SetForegroundWindow(dlg);
+            return TRUE;
+        }
+        if (msg == WM_COMMAND && (LOWORD(wp) == IDOK || LOWORD(wp) == IDCANCEL)) {
+            if (LOWORD(wp) == IDOK && self) {
+                wchar_t buf[256] = {};
+                GetDlgItemTextW(dlg, 101, buf, 256);
+                *self->value = buf;
+            }
+            EndDialog(dlg, LOWORD(wp));
+            return TRUE;
+        }
+        return FALSE;
+    }
+};
 
 // The app icon with a small status badge in the bottom-right corner (grey / amber / green / red).
 HICON MakeBadgedIcon(HINSTANCE instance, COLORREF badge) {
@@ -100,7 +182,7 @@ HICON MakeBadgedIcon(HINSTANCE instance, COLORREF badge) {
 
 const wchar_t* StatusText(shm::AgentStatus s) {
     switch (s) {
-    case shm::AgentStatus::NoDevice: return L"Waiting for iPhone (USB)";
+    case shm::AgentStatus::NoDevice: return L"Waiting for iPhone";
     case shm::AgentStatus::AppNotOpen: return L"Open Tethercam on your iPhone";
     case shm::AgentStatus::Connected: return L"Connected";
     case shm::AgentStatus::Streaming: return L"Streaming";
@@ -171,6 +253,7 @@ void Tray::Refresh() {
     nid.uCallbackMessage = kTrayMessage;
     nid.hIcon = IconFor(s.status);
     std::wstring tip = std::wstring(L"Tethercam: ") + StatusText(s.status);
+    if (s.transport == "wifi") tip += L" (Wi-Fi)";
     if (!s.detail.empty()) tip += L"\n" + Widen(s.detail);
     wcsncpy_s(nid.szTip, tip.c_str(), _TRUNCATE);
     if (!added_) added_ = Shell_NotifyIconW(NIM_ADD, &nid);
@@ -182,6 +265,8 @@ void Tray::ShowMenu() {
     HMENU menu = CreatePopupMenu();
     std::wstring status = StatusText(s.status);
     if (!s.device_name.empty()) status += L": " + Widen(s.device_name);
+    if (s.transport == "wifi") status += L" (Wi-Fi)";
+    else if (s.transport == "usb") status += L" (USB)";
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status.c_str());
     AppendMenuW(menu, MF_STRING, kPreview, L"Open Tethercam");
     SetMenuDefaultItem(menu, kPreview, FALSE);
@@ -213,6 +298,17 @@ void Tray::ShowMenu() {
     for (auto [id, deg] : rotations)
         AppendMenuW(rotate, MF_STRING | (s.rotation == deg ? MF_CHECKED : 0), id, std::format(L"{}°", deg).c_str());
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(rotate), L"Rotate");
+    HMENU wireless = CreatePopupMenu();
+    if (s.wifi_phone.empty()) {
+        AppendMenuW(wireless, MF_STRING | MF_GRAYED, 0, L"Not paired");
+        AppendMenuW(wireless, MF_STRING | MF_GRAYED, 0, L"Turn on Wireless in the iPhone app, then connect by USB once");
+    } else {
+        AppendMenuW(wireless, MF_STRING | MF_GRAYED, 0, (L"Paired: " + Widen(s.wifi_phone)).c_str());
+        const std::wstring addr = s.wifi_address.empty() ? L"found automatically" : Widen(s.wifi_address);
+        AppendMenuW(wireless, MF_STRING, kWifiAddress, (L"Address: " + addr + L"\u2026").c_str());
+        AppendMenuW(wireless, MF_STRING, kWifiForget, L"Forget Wi-Fi pairing");
+    }
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(wireless), L"Wireless");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (s.status_card ? MF_CHECKED : 0), kStatusCard,
                 L"Show status card while the camera is offline");
@@ -231,6 +327,13 @@ void Tray::ShowMenu() {
     else if (cmd == kStatusCard) engine_.SetStatusCard(!s.status_card);
     else if (cmd == kOpenLogs) ShellExecuteW(nullptr, L"open", log_dir_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     else if (cmd == kMirror) engine_.SetMirror(!s.mirror);
+    else if (cmd == kWifiForget) engine_.ForgetWifi();
+    else if (cmd == kWifiAddress) {
+        std::wstring value = Widen(s.wifi_address);
+        if (TextPrompt::Ask(nullptr, L"Tethercam Wi-Fi address",
+                            L"iPhone address (host or IP, optional :port). Leave empty to find it automatically.", value))
+            engine_.SetWifiAddress(Narrow(value));
+    }
     else if (cmd >= kRotate0 && cmd <= kRotate270) engine_.SetRotation(uint16_t((cmd - kRotate0) * 90));
     else if (cmd >= kQualityBase && cmd <= kQualityBase + 4) engine_.SetQuality(proto::Quality(cmd - kQualityBase));
     else if (cmd >= kCameraBase && cmd < kCameraBase + 256) engine_.SelectCamera(int(cmd - kCameraBase));

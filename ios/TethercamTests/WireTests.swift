@@ -36,7 +36,7 @@ final class WireTests: XCTestCase {
 
     func testAllVectorsRoundTrip() throws {
         let v = try vectors()
-        XCTAssertEqual(v.count, 18)
+        XCTAssertEqual(v.count, 20)
         for (name, bytes) in v {
             let m = try decodeOne(bytes)
             XCTAssertEqual(m.encoded(), bytes, name)
@@ -53,6 +53,16 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(pts, 1_000_000)
         XCTAssertTrue(key)
         XCTAssertEqual([UInt8](data), [0, 0, 0, 1, 0x65, 0x88])
+        guard case let .wifiPair(hostId, key, name) = try decodeOne(v["wifi_pair"]!) else { return XCTFail() }
+        XCTAssertEqual(hostId.count, 16)
+        XCTAssertEqual(key.last, 31)
+        XCTAssertEqual(name, "P")
+        guard case let .wifiPaired(status, deviceId, phone, port, address) = try decodeOne(v["wifi_paired"]!) else { return XCTFail() }
+        XCTAssertEqual(status, 0)
+        XCTAssertEqual(deviceId.first, 0xFF)
+        XCTAssertEqual(phone, "I")
+        XCTAssertEqual(port, Wire.wifiPort)
+        XCTAssertEqual(address, "10.1")
     }
 
     func testQualityPresetsAndValidation() throws {

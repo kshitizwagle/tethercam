@@ -11,7 +11,8 @@ add_executable(tcam_tests
     protocol_test.cpp
     usbmux_test.cpp
     media_test.cpp
-    agent_state_test.cpp)
+    agent_state_test.cpp
+    wifi_test.cpp)
 if(WIN32)
     target_sources(tcam_tests PRIVATE shm_test.cpp)
 endif()

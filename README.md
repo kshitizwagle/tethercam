@@ -5,8 +5,8 @@
 **[Project page →](https://kshitizwagle.com.np/projects/tethercam)**
 
 Tethercam turns an iPhone into a standard Windows webcam that Teams, Zoom, OBS, Streamlabs, browsers
-and the Camera app can use. No account, no watermark, no Wi-Fi, no overlays: plug in the cable, open
-the app, pick **Tethercam (Windows Virtual Camera)**.
+and the Camera app can use. No account, no watermark, no overlays: plug in the cable, open the app, pick
+**Tethercam (Windows Virtual Camera)**. Optionally, pair once over the cable and use it over Wi-Fi.
 
 > **Status: beta.** Works end to end with a real iPhone 15 Pro Max: 1080p30/60 and 4K30 through the
 > Windows camera stack, ~100 ms glass-to-glass latency at 1080p30, hardware encode and decode.
@@ -41,7 +41,8 @@ Full instructions: **[User guide](docs/USER_GUIDE.md)**. Streaming and call apps
 - The phone camera only runs while something is using it; lens and settings are remembered
 - Outputs black (not a message) while offline, plus a local [status API](docs/STATUS_API.md) so stream
   overlays can show their own "camera off" design
-- No network traffic: USB only, loopback only
+- No internet traffic: USB by default; optional Wi-Fi (new, not yet verified with a real iPhone) only to
+  PCs paired over the cable, encrypted end to end (Noise, Monocypher)
 - Linux: a v4l2loopback camera for browsers, Zoom, OBS and others, VA-API hardware decode, tray icon,
   the same status API (`.deb` for Ubuntu 24.04/26.04, `.rpm` for Fedora)
 

@@ -14,6 +14,8 @@ project safe to distribute:
   - Microsoft documentation and samples (Media Foundation, `MFCreateVirtualCamera`, Frame Server)
   - Open-source projects with compatible licenses, used as references: libimobiledevice / usbmuxd
     (protocol behavior), smourier/VCamSample (MIT, Windows 11 virtual camera), OBS Studio
+  - Monocypher (BSD-2-Clause / CC0, vendored unmodified in `third_party/monocypher`), the Noise Protocol
+    Framework specification and the public-domain cacophony test vectors (Wi-Fi transport)
   - Your own experiments on your own hardware
 - If a question can't be answered from public sources, add it to the **Open questions** list in
   [docs/TECH_SPEC.md](docs/TECH_SPEC.md) and design our own answer.

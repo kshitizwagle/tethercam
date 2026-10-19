@@ -60,6 +60,8 @@ public:
     int WaitReadable(int timeout_ms);
     void SetNoDelay();
     void SetRecvBuffer(int bytes);
+    // Port this socket is bound to (e.g. after ListenTcp(..., 0)); 0 on error.
+    uint16_t LocalPort() const;
 
 private:
     SocketHandle s_ = kInvalidSocket;

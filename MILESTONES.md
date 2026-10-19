@@ -17,6 +17,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 | M8 | Backlog | ⬜ |
 | M9 | Linux host | 🟨 agent, tray, packages done and verified with fakephone; package install and real iPhone pending |
 | M10 | Under-load performance + GPU path | ✅ Linux A/B; Windows load24 0–0.2 % frame loss through Frame Server |
+| M11 | Wireless (Wi-Fi) transport | 🟨 Windows side verified with fakephone (pair → Bonjour → encrypted 1080p30 through the vcam); Linux + iOS written, need CI; real iPhone pending |
 
 ## M0: Foundations
 **Goal:** a project anyone can clone, understand and build.
@@ -116,3 +117,17 @@ usbmuxd `Listen` instead of polling.
 - [x] Windows build, tests and MSI green in CI (v0.1.12)
 - [x] vcam: samples go out as soon as a new frame arrives within their interval (fixed cadence, repeat only at the interval's end); replaces the free-running timer + 2 ms grace (R10)
 - [x] Windows load harness (`windows\scripts\load-test.ps1`; target: ≤ 10 % frame loss at load24): idle 60.0 fps, load24 0–0.2 % loss (2026-10-16); the Linux A/B measured 31.3 → 34.1 fps with fewer long gaps (`docs/perf.md`)
+
+## M11: Wireless (Wi-Fi) transport
+**Goal:** a paired PC uses the iPhone over the local Wi-Fi network, encrypted end to end, with USB still
+the default (TECH_SPEC §14, PROTOCOL § Wireless transport).
+**Exit criteria:**
+- [x] Scope change documented: PRODUCT goals/non-goals, TECH_SPEC F10–F12, N4/N5, §14, R11–R12, Q8–Q9, PROTOCOL wireless section
+- [x] Monocypher vendored; sessions run over a `Link` on both hosts with no behavior change (Windows tests green; Linux needs CI)
+- [x] Noise NNpsk0 sessions + encrypted records pass the published Noise vector (C++ and Swift) and fuzz tests; fakephone → agent over Wi-Fi streams on Windows (fakephone; Linux not built here)
+- [x] `WifiPair` over `--tcp` stores the key on the PC (DPAPI) and in fakephone; an unpaired host or wrong key is refused (fakephone; Keychain side needs the device)
+- [ ] Bonjour discovery (Windows DnsServiceBrowse, Linux Avahi) + manual address; USB preferred and taken over mid-session (F12) (written; Windows discovery verified with `fakephone --advertise`; Avahi and USB takeover unverified)
+- [ ] Tray/GTK: paired phone, editable address, Forget; Status API `transport` field (built; `transport` verified; menus not yet clicked by eye)
+- [ ] iOS: Wireless toggle, Wi-Fi listener + Bonjour, `WifiPair` handling, paired PCs with Forget, Keychain store, Local Network permission (Mac/CI) (written; Noise/WifiChannel compiled and checked with swiftc here; app build pending in CI)
+- [ ] Real iPhone over Wi-Fi: pair over USB, unplug, 1080p30/60, USB handover, latency and frame loss vs USB in `docs/perf.md` (device)
+- [x] USER_GUIDE, README, STATUS_API, DESIGN and CONTRIBUTING updated (Wi-Fi marked as not yet verified with a real iPhone)

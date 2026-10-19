@@ -15,11 +15,13 @@ changes shape.
 │   │   ├── App/               TethercamApp.swift, ContentView.swift (SwiftUI)
 │   │   ├── Capture/           CameraController.swift (AVCaptureSession, lens/format selection)
 │   │   ├── Encode/            H264Encoder.swift (VTCompressionSession)
-│   │   ├── Net/               Server.swift (NWListener), Session.swift (protocol state machine)
+│   │   ├── Net/               Server.swift (USB + Wi-Fi NWListeners), Session.swift (protocol state machine),
+│   │   │                      Noise.swift + WifiChannel.swift (Wi-Fi crypto), WifiPairings.swift (Keychain)
 │   │   └── Protocol/          Wire.swift (encode/decode, mirrors PROTOCOL.md)
 │   └── TethercamTests/        protocol codec + Annex-B conversion tests
 ├── common/                    static lib shared by both hosts: protocol codec, plist mini, usbmux client,
-│   │                          sockets, logging, shm layout (Windows only)
+│   │                          sockets, logging, shm layout (Windows only), Link/SecureLink + Noise +
+│   │                          pairing store (Wi-Fi, M11)
 │   └── tests/                 GoogleTest (FetchContent), runs on Windows and Linux
 ├── linux/                     Linux host (M9): CMake root, builds common + tests so far
 ├── windows/
@@ -30,6 +32,7 @@ changes shape.
 │   ├── tools/fakephone/       device simulator over TCP
 │   ├── tests/                 agent GoogleTests (Windows only)
 │   └── installer/             WiX 5 MSI
+├── third_party/monocypher/    Monocypher 4.0.2, unmodified (hosts and iOS app)
 └── .github/workflows/         ci.yml orchestrates windows.yml, linux.yml and ios.yml
 ```
 
@@ -68,8 +71,11 @@ On `SetFormat` or `SetCamera` while streaming: reconfigure capture (`beginConfig
 **Backpressure:** `Server` tracks the bytes in flight on the `NWConnection` (send completions). Above
 the 250 ms budget it sets `dropUntilKeyframe`, skips frames, and forces an IDR.
 
-The server listens on `127.0.0.1:5321`, reachable from Windows through usbmuxd. A new connection
-replaces the previous client. When returning to the foreground without a connection, the app
+The server listens on `127.0.0.1:5321`, reachable from the PC through usbmuxd. With Wireless on it also
+listens on port 5322 (Wi-Fi/Ethernet, never cellular) and advertises `_tethercam._tcp`; a Wi-Fi
+connection reaches `Session` only after `WifiChannel` completes the Noise handshake, and its traffic is
+sealed/opened in records on the session queue. `WifiPair` is honoured only on the USB connection. A new
+connection on either port replaces the previous client. When returning to the foreground without a connection, the app
 recreates the listener; it also retries listener failures. The camera preview can run while the
 phone app is open without encoding or transmitting to the PC.
 
@@ -84,7 +90,8 @@ validation of that change remains pending in [perf.md](perf.md).
 | Thread | Job |
 |---|---|
 | UI thread | Message loop, tray icon and menu (`agent/tray.cpp`). Refreshed by `PostMessage` from the engine |
-| Engine thread | `agent/engine.cpp`: device discovery, the protocol session, H.264 decode, scaling and the shm writer, all in one loop that polls the socket every 20 ms |
+| Engine thread | `agent/engine.cpp`: device discovery, the protocol session, H.264 decode, scaling and the shm writer, all in one loop that polls the socket every 20 ms. Sessions run over a `Link`: plain for USB/`--tcp`, `SecureLink` for Wi-Fi. With no USB phone it tries paired phones over Wi-Fi every 3 s (700 ms connect timeout per address); during a Wi-Fi session it checks usbmuxd every 2 s and drops Wi-Fi when a USB phone appears |
+| DNS client callbacks | `agent/discovery.cpp`: `DnsServiceBrowse`/`DnsServiceResolve` results for `_tethercam._tcp`, started once a phone is paired; the engine reads a mutex-protected list |
 | Status accept thread | Loopback HTTP requests and SSE subscriptions (`agent/status_server.cpp`) |
 | Status keepalive thread | Sends SSE keepalive comments every 15 seconds |
 
@@ -292,6 +299,7 @@ shows black by default, or the placeholder for `agent_status` when `placeholder_
 | Unit | Protocol codec (golden vectors), plist writer/reader, usbmux packet framing, Annex-B conversion, format chooser, shm seqlock | `common/tests`, `windows/tests`, `ios/TethercamTests` |
 | Fuzz-ish | Random/truncated frames into the protocol parser and plist reader (no crashes, bounded allocations) | `common/tests` |
 | Integration (no phone) | `fakephone` → agent over TCP (`--tcp 127.0.0.1:5321`) → shm → vcam → Windows Camera app | Manual + scripted with `tcprobe` |
+| Wi-Fi transport | Noise vector (C++ and Swift), records, preamble/pairing-file fuzzing, engine pair-then-Wi-Fi test; `fakephone --advertise` + agent end to end | `common/tests/wifi_test.cpp`, `windows/tests/wifi_engine_test.cpp`, `ios/TethercamTests/NoiseTests.swift` |
 | Device | Real iPhone over USB: formats, lens switching, hot-plug, lock/unlock, thermals | Manual checklist in MILESTONES exit criteria |
 | Compatibility | Camera app, Teams, Zoom, OBS, Chrome, Edge × 720p/1080p/4K | Matrix in `docs/compat.md` (created in M4) |
 | Latency | Phone films an on-screen ms clock; screenshot comparison | M3/M5 measurements recorded in `docs/perf.md` |

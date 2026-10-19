@@ -13,6 +13,8 @@ final class Session: @unchecked Sendable {
         var fps = 0.0
         var mbps = 0.0
         var message = "Waiting for PC"
+        var transport = ""  // "USB" or "Wi-Fi" while connected
+        var wifiState = ""  // Wi-Fi listener problem to show, empty when fine or off
     }
 
     let camera = CameraController()
@@ -36,6 +38,14 @@ final class Session: @unchecked Sendable {
     private var streaming = false
     private var paused = false
     private var thermalLimited = false
+
+    // Wi-Fi (M11): opt-in; PCs pair by handing over a key while connected by USB.
+    let pairings = WifiPairings()
+    private static let wirelessKey = "wirelessEnabled"
+    private var wireless = UserDefaults.standard.bool(forKey: Session.wirelessKey)
+    private var pendingOffer: (hostId: Data, key: Data, name: String)?  // offered over USB while Wireless was off
+    /// Called on the main queue when the paired PCs change.
+    var onPairingsChange: (([WifiPairings.Host]) -> Void)?
 
     // Output state.
     private var configSent = false
@@ -82,7 +92,11 @@ final class Session: @unchecked Sendable {
             server.onDisconnect = { [weak self] in self?.disconnected() }
             server.onData = { [weak self] data in self?.received(data) }
             server.onListenerState = { [weak self] text in self?.update { $0.message = text == "Listening" ? "Waiting for PC" : text } }
+            server.onWifiState = { [weak self] text in self?.update { $0.wifiState = text } }
+            server.keyLookup = { [pairings] id in pairings.key(for: id) }
+            server.deviceIdHex = pairings.deviceIdHex
             server.start()
+            server.setWifi(enabled: wireless)
             startTimers()
             startPreview()
         }
@@ -111,6 +125,41 @@ final class Session: @unchecked Sendable {
     /// Lens in use when the app starts (remembered from last time).
     var initialCamera: UInt8 { queue.sync { cameraId } }
     var initialQuality: CaptureQuality { queue.sync { quality } }
+    var initialWireless: Bool { queue.sync { wireless } }
+
+    /// Wireless toggled on the phone. Turning it on during a USB session accepts that PC's pending offer.
+    func setWireless(_ on: Bool) {
+        queue.async { [self] in
+            wireless = on
+            UserDefaults.standard.set(on, forKey: Self.wirelessKey)
+            server.setWifi(enabled: on)
+            if on, let offer = pendingOffer, server.isConnected, !server.isWifi {
+                pendingOffer = nil
+                acceptPairing(offer.hostId, offer.key, offer.name)
+            }
+        }
+    }
+
+    /// Forgets a paired PC; an open Wi-Fi session with it ends.
+    func forgetHost(_ hostId: Data) {
+        queue.async { [self] in
+            pairings.forget(hostId: hostId)
+            if server.isWifi, server.wifiHostId == hostId { server.disconnect() }
+            publishPairings()
+        }
+    }
+
+    private func acceptPairing(_ hostId: Data, _ key: Data, _ name: String) {
+        pairings.store(hostId: hostId, key: key, name: name)
+        send(.wifiPaired(status: 0, deviceId: pairings.deviceId, name: UIDevice.current.name, port: Wire.wifiPort,
+                         address: WifiPairings.wifiAddress()))
+        publishPairings()
+    }
+
+    private func publishPairings() {
+        let hosts = pairings.all
+        DispatchQueue.main.async { [weak self] in self?.onPairingsChange?(hosts) }
+    }
 
     func selectQuality(_ value: CaptureQuality) {
         queue.async { [self] in
@@ -162,12 +211,14 @@ final class Session: @unchecked Sendable {
         // Announce the saved preference before Caps so the host's first Start uses it.
         send(.setQuality(quality))
         send(.caps(cameras: camera.cameras, codecs: 1))
-        update { $0.connected = true; $0.message = "Connected" }
+        let transport = server.isWifi ? "Wi-Fi" : "USB"
+        update { $0.connected = true; $0.message = "Connected"; $0.transport = transport }
     }
 
     private func disconnected() {
+        pendingOffer = nil
         stopStreaming()
-        update { $0.connected = false; $0.streaming = false; $0.message = "Waiting for PC" }
+        update { $0.connected = false; $0.streaming = false; $0.message = "Waiting for PC"; $0.transport = "" }
     }
 
     private func received(_ data: Data) {
@@ -197,6 +248,16 @@ final class Session: @unchecked Sendable {
         case let .setQuality(value):
             // The host follows with SetFormat: it owns capability negotiation and output scaling.
             rememberQuality(value)
+        case let .wifiPair(hostId, key, name):
+            // Keys are only accepted over the trusted USB link, never over the network.
+            guard !server.isWifi, hostId.count == 16, key.count == Noise.keySize else { break }
+            if wireless {
+                acceptPairing(hostId, key, name)
+            } else {
+                pendingOffer = (hostId, key, name)
+                send(.wifiPaired(status: 1, deviceId: pairings.deviceId, name: UIDevice.current.name, port: Wire.wifiPort,
+                                 address: ""))
+            }
         case let .setFormat(w, h, fps, _, bitrate):
             format = (w, h, max(1, fps))
             requestedBitrate = bitrate

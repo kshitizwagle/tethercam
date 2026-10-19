@@ -3,6 +3,8 @@
 This is our own protocol. It runs over a single TCP stream between the Windows agent (the **host**) and the
 iOS app (the **device**). The TCP stream is tunnelled over USB by Apple's usbmuxd service: the host asks
 usbmuxd to connect to the device's port **5321**, and from then on the socket is a plain byte stream.
+Over Wi-Fi (M11) the same byte stream runs inside an encrypted channel on port 5322; see
+[Wireless transport](#wireless-transport-m11).
 How usbmuxd itself works is described in [TECH_SPEC.md § USB transport](TECH_SPEC.md#4-usb-transport-usbmuxd).
 
 ## Conventions
@@ -42,6 +44,8 @@ The payload follows the header directly.
 | 0x21 | `VideoFrame` | device → host | One encoded access unit |
 | 0x30 | `Heartbeat` | both | Liveness, every 1 s |
 | 0x31 | `Status` | device → host | Thermal state, battery, actual bitrate |
+| 0x40 | `WifiPair` | host → device, USB only | Hand over the Wi-Fi pairing key (M11) |
+| 0x41 | `WifiPaired` | device → host, USB only | Pairing result and the phone's Wi-Fi address (M11) |
 | 0x7F | `Error` | both | Report a problem |
 
 ### 0x16 SetQuality
@@ -201,6 +205,76 @@ host                                device
  |<------------- VideoFrame (IDR) ----|
  |---- Stop ------------------------->|   last app closed the camera
 ```
+
+## Wireless transport (M11)
+
+Pairing happens only over USB (`WifiPair` / `WifiPaired` below). Over Wi-Fi the host then connects to the
+phone's port **5322** directly (the address the phone reported in `WifiPaired`, its Bonjour
+`_tethercam._tcp` advert, or an address the user entered). The connection starts with a preamble and a
+Noise handshake on the pairing key; everything after the handshake is encrypted. Implementations:
+`common/src/link.cpp` + `noise.cpp` (hosts, fakephone) and `ios/Tethercam/Net/WifiChannel.swift` +
+`Noise.swift` (phone), both on Monocypher.
+
+### 0x40 WifiPair (host → device, USB only)
+
+Sent after `Hello` in every USB session.
+
+| Field | Type | Notes |
+|---|---|---|
+| `host_id` | 16 bytes | Random, generated once per PC user (kept in the host's pairing file) |
+| `key` | 32 bytes | Random, generated once per PC–phone pair, kept by the host under the phone's USB serial |
+| `name` | str | Host display name (computer name) |
+
+A device ignores `WifiPair` arriving over Wi-Fi. Older devices ignore the type.
+
+### 0x41 WifiPaired (device → host, USB only)
+
+The reply; sent again if Wireless is turned on later in the same USB session.
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | u8 | 0 = paired (key stored), 1 = Wireless is off (nothing stored) |
+| `device_id` | 16 bytes | Random, generated once per phone install; also the Bonjour TXT `id` (hex) |
+| `name` | str | Phone display name |
+| `port` | u16 | Wi-Fi port, 5322 |
+| `address` | str | Current Wi-Fi IPv4 address, empty if unknown |
+
+### Bonjour
+
+The phone advertises `_tethercam._tcp` on the Wi-Fi port while Wireless is on, TXT `v=1` and
+`id=<device_id as lowercase hex>`. Hosts browse only once they have a pairing.
+
+### Preamble (host → device, 24 bytes, plaintext)
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| 0 | 4 | `magic` | ASCII `TCWF` |
+| 4 | 1 | `version` | `1` |
+| 5 | 3 | reserved | send 0, ignore |
+| 8 | 16 | `host_id` | Selects the pairing key |
+
+Bad magic, an unknown version or an unknown `host_id` → the device closes the connection.
+
+### Session handshake (Noise NNpsk0)
+
+`Noise_NNpsk0_25519_ChaChaPoly_BLAKE2b` (noiseprotocol.org rev. 34), host = initiator, PSK = the pairing
+key, prologue = the 24 preamble bytes, empty payloads. Each handshake message is sent as `u16 LE length`
++ bytes (48 bytes each). A handshake that fails authentication closes the connection; the phone also
+drops a connection that hasn't finished the handshake within 5 s.
+
+### Records
+
+After the handshake both directions carry `u32 LE length` + ciphertext (Noise transport messages:
+ChaCha20-Poly1305, nonce = 32 zero bits + 64-bit LE counter, empty AD; plaintext ≤ 65 519 bytes + 16-byte
+tag). The plaintexts concatenate into the ordinary TCAM v1 byte stream described above; message
+boundaries don't have to line up with records. A record that fails authentication, or a length outside
+16..65 535, closes the connection.
+
+### Test vectors
+
+Both implementations pass the public `Noise_NNpsk0_25519_ChaChaPoly_BLAKE2b` vector from the cacophony
+suite (`common/tests/wifi_test.cpp`, `ios/TethercamTests/NoiseTests.swift`); `WifiPair`/`WifiPaired` are in
+`docs/protocol-vectors/v1.txt`.
 
 ## Versioning
 

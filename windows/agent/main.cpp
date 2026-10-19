@@ -4,7 +4,9 @@
 //   tethercam-agent                    run the tray agent
 //   tethercam-agent --console          run with a console log (no tray)
 //   tethercam-agent --preview          open the preview window at startup
-//   tethercam-agent --tcp HOST:PORT    use plain TCP to a simulated device (fakephone)
+//   tethercam-agent --tcp HOST:PORT    use plain TCP to a simulated device (fakephone); pairs like USB
+//   tethercam-agent --wifi HOST[:PORT] connect over Wi-Fi to the paired phone at this address
+//   tethercam-agent --pairing-file P   Wi-Fi pairing file (default %LOCALAPPDATA%\Tethercam\pairing.bin)
 //   tethercam-agent --session-camera   also create a temporary camera for this session (no admin)
 //   tethercam-agent --install [--user] [--dll PATH]     register the virtual camera
 //   tethercam-agent --uninstall [--user] [--dll PATH]   remove it
@@ -87,6 +89,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         else if (a == L"--session-camera") session_camera = true;
         else if (a == L"--software-decode") options.prefer_hardware_decode = false;
         else if (a == L"--tcp" && i + 1 < argc) options.tcp = Narrow(argv[++i]);
+        else if (a == L"--wifi" && i + 1 < argc) options.wifi = Narrow(argv[++i]);
+        else if (a == L"--pairing-file" && i + 1 < argc) options.pairing_file = Narrow(argv[++i]);
         else if (a == L"--dll" && i + 1 < argc) dll = argv[++i];
     }
     LocalFree(argv);

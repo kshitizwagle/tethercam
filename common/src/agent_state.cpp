@@ -61,11 +61,11 @@ std::string StatusJson(const Snapshot& snap) {
     }
     const bool live = snap.status == AgentStatus::Streaming && snap.fps > 0;
     return std::format(
-        R"({{"state":"{}","live":{},"device":"{}","camera":"{}","lens":"{}","width":{},"height":{},"fps":{},"mirror":{},"rotation":{},"detail":"{}","thermal":{},"battery":{},"charging":{},"version":"{}","quality":"{}"}})",
+        R"({{"state":"{}","live":{},"device":"{}","camera":"{}","lens":"{}","width":{},"height":{},"fps":{},"mirror":{},"rotation":{},"detail":"{}","thermal":{},"battery":{},"charging":{},"version":"{}","quality":"{}","transport":"{}"}})",
         StateName(snap.status), live ? "true" : "false", JsonEscape(snap.device_name), JsonEscape(camera), lens,
         snap.width, snap.height, snap.fps, snap.mirror ? "true" : "false", snap.rotation,
         JsonEscape(snap.detail), snap.thermal, snap.battery, snap.charging ? "true" : "false", Version(),
-        QualityLabel(snap.quality));
+        QualityLabel(snap.quality), snap.transport);
 }
 
 }  // namespace agent

@@ -9,6 +9,8 @@ enum Wire {
     static let headerSize = 12
     static let maxPayload = 16 * 1024 * 1024
     static let devicePort: UInt16 = 5321
+    /// Encrypted Wi-Fi transport (docs/PROTOCOL.md § Wireless transport).
+    static let wifiPort: UInt16 = 5322
 }
 
 enum MessageType: UInt8 {
@@ -25,6 +27,8 @@ enum MessageType: UInt8 {
     case videoFrame = 0x21
     case heartbeat = 0x30
     case status = 0x31
+    case wifiPair = 0x40    // host -> device, over USB only
+    case wifiPaired = 0x41  // device -> host, over USB only
     case error = 0x7F
 }
 
@@ -99,6 +103,10 @@ enum Message: Equatable, Sendable {
     case heartbeat(sendTimeUs: UInt64)
     case status(thermal: UInt8, battery: UInt8, charging: Bool, bitrateKbps: UInt32, fpsX100: UInt16, cameraId: UInt8)
     case error(code: UInt16, message: String)
+    /// The host's key for later Wi-Fi sessions (16-byte host ID, 32-byte key).
+    case wifiPair(hostId: Data, key: Data, name: String)
+    /// status 0 = paired, 1 = Wireless is off.
+    case wifiPaired(status: UInt8, deviceId: Data, name: String, port: UInt16, address: String)
     case unknown(type: UInt8)
 }
 
@@ -181,6 +189,8 @@ extension Message {
         case .heartbeat: return MessageType.heartbeat.rawValue
         case .status: return MessageType.status.rawValue
         case .error: return MessageType.error.rawValue
+        case .wifiPair: return MessageType.wifiPair.rawValue
+        case .wifiPaired: return MessageType.wifiPaired.rawValue
         case .unknown(let t): return t
         }
     }
@@ -220,6 +230,10 @@ extension Message {
             p.u8(thermal); p.u8(battery); p.u8(charging ? 1 : 0); p.u32(bitrate); p.u16(fps); p.u8(camera)
         case let .error(code, message):
             p.u16(code); p.str(message)
+        case let .wifiPair(hostId, key, name):
+            p.bytes(Self.fixed(hostId, 16)); p.bytes(Self.fixed(key, 32)); p.str(name)
+        case let .wifiPaired(status, deviceId, name, port, address):
+            p.u8(status); p.bytes(Self.fixed(deviceId, 16)); p.str(name); p.u16(port); p.str(address)
         }
         var out = ByteWriter()
         out.bytes(Data(Wire.magic))
@@ -229,6 +243,13 @@ extension Message {
         out.u32(UInt32(p.data.count))
         out.bytes(p.data)
         return out.data
+    }
+
+    /// Exactly `n` bytes: truncated or zero-padded (IDs and keys are fixed-size on the wire).
+    private static func fixed(_ d: Data, _ n: Int) -> Data {
+        var out = Data(d.prefix(n))
+        if out.count < n { out.append(Data(count: n - out.count)) }
+        return out
     }
 
     /// Decodes a payload; nil for a malformed known message.
@@ -286,6 +307,12 @@ extension Message {
             msg = .status(thermal: thermal, battery: battery, charging: charging, bitrateKbps: bitrate, fpsX100: fps, cameraId: camera)
         case .error:
             msg = .error(code: r.u16(), message: r.str())
+        case .wifiPair:
+            msg = .wifiPair(hostId: Data(r.bytes(16)), key: Data(r.bytes(32)), name: r.str())
+        case .wifiPaired:
+            let status = r.u8()
+            let deviceId = Data(r.bytes(16))
+            msg = .wifiPaired(status: status, deviceId: deviceId, name: r.str(), port: r.u16(), address: r.str())
         case .none:
             return .unknown(type: type)
         }

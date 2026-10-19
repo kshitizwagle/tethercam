@@ -126,6 +126,19 @@ void Socket::SetRecvBuffer(int bytes) {
     setsockopt(s_, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&bytes), sizeof(bytes));
 }
 
+uint16_t Socket::LocalPort() const {
+    sockaddr_storage addr{};
+#ifdef _WIN32
+    int size = sizeof(addr);
+#else
+    socklen_t size = sizeof(addr);
+#endif
+    if (getsockname(s_, reinterpret_cast<sockaddr*>(&addr), &size) != 0) return 0;
+    if (addr.ss_family == AF_INET) return ntohs(reinterpret_cast<const sockaddr_in*>(&addr)->sin_port);
+    if (addr.ss_family == AF_INET6) return ntohs(reinterpret_cast<const sockaddr_in6*>(&addr)->sin6_port);
+    return 0;
+}
+
 Socket ConnectTcp(const std::string& host, uint16_t port, int timeout_ms) {
     if (!Init()) return {};
     addrinfo hints{};

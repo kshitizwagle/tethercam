@@ -25,6 +25,8 @@ constexpr auto kIdleFrame = std::chrono::milliseconds(100);
 // A stall shorter than this holds the last live frame; longer goes black (nothing looks frozen).
 constexpr auto kStaleFrame = std::chrono::milliseconds(750);
 constexpr MediaFormat kAutoFormat{1920, 1080, 30};
+constexpr auto kWifiRetry = std::chrono::seconds(3);
+constexpr auto kUsbCheck = std::chrono::seconds(2);
 
 bool SleepUnless(const std::atomic<bool>& stop, int ms) {
     for (int t = 0; t < ms && !stop; t += 20) std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -44,14 +46,56 @@ void Engine::Start(std::function<void()> on_change) {
         const int quality = std::atoi(settings_.Get("Quality").c_str());
         snap_.quality = quality >= 0 && quality <= 4 ? proto::Quality(quality) : proto::Quality::Auto;
         quality_dirty_ = settings_.Get("QualityPending") == "1";
+        pairing_ = wifi::PairingStore(opt_.pairing_file.empty() ? wifi::PairingStore::DefaultPath() : opt_.pairing_file);
+        if (!pairing_.Load()) log::Warn("cannot read the Wi-Fi pairing file; starting without pairings");
+        UpdateWifiSnapshotLocked();
     }
     thread_ = std::thread([this] { Run(); });
 }
 
 void Engine::StopThread() {
     stop_ = true;
-    if (auto* s = live_socket_.load()) s->Shutdown();
+    if (auto* l = live_link_.load()) l->Shutdown();
     if (thread_.joinable()) thread_.join();
+}
+
+void Engine::UpdateWifiSnapshotLocked() {
+    const auto confirmed = pairing_.Confirmed();
+    snap_.wifi_phone.clear();
+    snap_.wifi_address.clear();
+    if (confirmed.empty()) return;
+    const auto& p = *confirmed.front();
+    snap_.wifi_phone = p.name.empty() ? "iPhone" : p.name;
+    snap_.wifi_address = !p.manual.empty() ? p.manual : p.address;
+}
+
+void Engine::SavePairingLocked() {
+    if (!pairing_.Save()) log::Warn("cannot save the Wi-Fi pairing file");
+}
+
+void Engine::ForgetWifi() {
+    {
+        std::lock_guard lock(mu_);
+        pairing_.ForgetAll();
+        SavePairingLocked();
+        UpdateWifiSnapshotLocked();
+    }
+    log::Info("Wi-Fi pairings forgotten");
+    if (wifi_session_)
+        if (auto* l = live_link_.load()) l->Shutdown();
+    Notify();
+}
+
+void Engine::SetWifiAddress(const std::string& address) {
+    {
+        std::lock_guard lock(mu_);
+        const auto confirmed = pairing_.Confirmed();
+        if (confirmed.empty()) return;
+        pairing_.SetManual(confirmed.front()->serial, address);
+        SavePairingLocked();
+        UpdateWifiSnapshotLocked();
+    }
+    Notify();
 }
 
 Snapshot Engine::Get() const {
@@ -193,36 +237,85 @@ void Engine::FeedIdle() {
     else out_.WriteBlack();
 }
 
-bool Engine::OpenLink(net::Socket& out) {
+bool Engine::OpenLink(std::unique_ptr<Link>& out) {
+    link_serial_.clear();
     if (!opt_.tcp.empty()) {
         const auto colon = opt_.tcp.rfind(':');
-        out = net::ConnectTcp(opt_.tcp.substr(0, colon), static_cast<uint16_t>(std::atoi(opt_.tcp.c_str() + colon + 1)));
-        if (!out.Valid()) {
+        net::Socket sock =
+            net::ConnectTcp(opt_.tcp.substr(0, colon), static_cast<uint16_t>(std::atoi(opt_.tcp.c_str() + colon + 1)));
+        if (!sock.Valid()) {
             SetStatus(AgentStatus::NoDevice, "no device at " + opt_.tcp);
             return false;
         }
-        out.SetNoDelay();
+        sock.SetNoDelay();
+        out = std::make_unique<PlainLink>(std::move(sock));
+        link_serial_ = "tcp:" + opt_.tcp;  // stands in for USB, so fakephone can pair
         return true;
     }
-    auto devices = usbmux::Client::ListDevices();
-    if (!devices) {
-        // On Linux, udev starts usbmuxd when an iPhone is plugged in, so "not running" usually
-        // just means no phone yet.
-        SetStatus(AgentStatus::NoDevice, "usbmuxd not running; plug in the iPhone");
-        return false;
-    }
+    if (!opt_.wifi.empty()) return OpenWifi(out);
+    const auto devices = usbmux::Client::ListDevices();
     bool any_usb = false;
-    for (const auto& d : *devices) {
-        if (d.connection_type != "USB") continue;  // wired only (PRODUCT.md)
-        any_usb = true;
-        const auto r = usbmux::Client::Connect(d.device_id, proto::kDevicePort, out);
-        if (r == usbmux::ConnectResult::Ok) {
-            log::Info("connected to device {} ({}) over USB", d.device_id, d.serial);
-            return true;
+    if (devices) {
+        for (const auto& d : *devices) {
+            // usbmuxd's network entries can't reach our port; Wi-Fi uses our own encrypted transport.
+            if (d.connection_type != "USB") continue;
+            any_usb = true;
+            net::Socket sock;
+            const auto r = usbmux::Client::Connect(d.device_id, proto::kDevicePort, sock);
+            if (r == usbmux::ConnectResult::Ok) {
+                log::Info("connected to device {} ({}) over USB", d.device_id, d.serial);
+                out = std::make_unique<PlainLink>(std::move(sock));
+                link_serial_ = d.serial;
+                return true;
+            }
+            SetStatus(AgentStatus::AppNotOpen, usbmux::ToString(r));
         }
-        SetStatus(AgentStatus::AppNotOpen, usbmux::ToString(r));
     }
-    if (!any_usb) SetStatus(AgentStatus::NoDevice);
+    // USB wins (F12); with no phone on USB, a phone paired for Wi-Fi may be on the network.
+    if (!any_usb && OpenWifi(out)) return true;
+    // On Linux, udev starts usbmuxd when an iPhone is plugged in, so "not running" usually just
+    // means no phone yet.
+    if (!devices) SetStatus(AgentStatus::NoDevice, "usbmuxd not running; plug in the iPhone");
+    else if (!any_usb) SetStatus(AgentStatus::NoDevice);
+    return false;
+}
+
+bool Engine::OpenWifi(std::unique_ptr<Link>& out) {
+    const auto now = Clock::now();
+    if (opt_.wifi.empty() && now - last_wifi_try_ < kWifiRetry) return false;
+    std::vector<wifi::Candidate> candidates;
+    wifi::HostId host;
+    {
+        std::lock_guard lock(mu_);
+        if (pairing_.Confirmed().empty()) return false;
+        host = pairing_.host_id();
+        if (!discovery_ && opt_.wifi.empty()) discovery_ = wifi::StartDiscovery();
+        const auto found = discovery_ ? discovery_->Found() : std::vector<wifi::Discovered>{};
+        candidates = wifi::Candidates(pairing_, found, opt_.wifi);
+    }
+    last_wifi_try_ = now;
+    for (const auto& c : candidates) {
+        if (stop_) return false;
+        TickCamera();  // an absent phone costs up to a connect timeout per address
+        FeedIdle();
+        net::Socket sock = net::ConnectTcp(c.host, c.port, 700);
+        if (!sock.Valid()) continue;
+        sock.SetNoDelay();
+        auto link = wifi::ConnectHost(std::move(sock), host, c.phone.key, 2000);
+        const std::string where = std::format("{} at {}:{}", c.phone.name, c.host, c.port);
+        if (!link) {
+            if (last_wifi_warning_ != where)
+                log::Warn("{} refused the Wi-Fi connection (pairing forgotten on the iPhone, or Wireless off); "
+                          "connect it by USB once to pair again", where);
+            last_wifi_warning_ = where;
+            continue;
+        }
+        last_wifi_warning_.clear();
+        log::Info("connected to {} over Wi-Fi", where);
+        out = std::move(link);
+        return true;
+    }
+    if (!opt_.wifi.empty()) SetStatus(AgentStatus::NoDevice, "no paired phone at " + opt_.wifi);
     return false;
 }
 
@@ -231,19 +324,24 @@ void Engine::Run() {
     // Keep the decode/delivery loop schedulable on a loaded machine (the systemd unit raises
     // CPUWeight as well). Silently ignored when RLIMIT_NICE doesn't allow it.
     if (::setpriority(PRIO_PROCESS, 0, -5) == 0) log::Info("media priority: nice -5");
-    log::Info("Tethercam agent {} started{}", Version(), opt_.tcp.empty() ? "" : " (TCP mode: " + opt_.tcp + ")");
+    log::Info("Tethercam agent {} started{}{}", Version(), opt_.tcp.empty() ? "" : " (TCP mode: " + opt_.tcp + ")",
+              opt_.wifi.empty() ? "" : " (Wi-Fi: " + opt_.wifi + ")");
     while (!stop_) {
         TickCamera();
         FeedIdle();
-        net::Socket sock;
-        if (OpenLink(sock)) {
-            live_socket_ = &sock;
-            RunSession(sock);
-            live_socket_ = nullptr;
+        std::unique_ptr<Link> link;
+        if (OpenLink(link)) {
+            live_link_ = link.get();
+            wifi_session_ = link->Encrypted();
+            RunSession(*link);
+            live_link_ = nullptr;
+            wifi_session_ = false;
+            link.reset();
             {
                 std::lock_guard lock(mu_);
                 snap_.cameras.clear();
                 snap_.device_name.clear();
+                snap_.transport.clear();
                 snap_.width = snap_.height = snap_.fps = 0;
             }
             Notify();
@@ -260,14 +358,31 @@ void Engine::Run() {
     log::Info("agent stopped");
 }
 
-void Engine::RunSession(net::Socket& sock) {
-    auto send = [&](const proto::Message& m) { return sock.SendAll(proto::Encode(m)); };
+void Engine::RunSession(Link& link) {
+    auto send = [&](const proto::Message& m) { return link.SendAll(proto::Encode(m)); };
+    const bool wifi = link.Encrypted();
     proto::Hello hello;
     hello.role = proto::Role::Host;
     hello.app_version = std::string(Version());
     hello.name = "Tethercam for Linux";
     hello.model = "Linux";
     if (!send(hello)) return;
+    {
+        std::lock_guard lock(mu_);
+        snap_.transport = wifi ? "wifi" : "usb";
+    }
+    // Pairing happens only over USB (the trusted link): offer this phone's key every time. The phone
+    // stores it if Wireless is on and answers WifiPaired; older apps ignore the message.
+    if (!wifi && !link_serial_.empty()) {
+        proto::WifiPair pair;
+        {
+            std::lock_guard lock(mu_);
+            pair.host_id = pairing_.host_id();
+            pair.key = pairing_.ForSerial(link_serial_).key;
+        }
+        pair.name = wifi::LocalHostName();
+        if (!send(pair)) return;
+    }
     SetStatus(AgentStatus::Connected);
 
     proto::StreamParser parser;
@@ -285,6 +400,7 @@ void Engine::RunSession(net::Socket& sock) {
     uint8_t camera_id = 0;
     auto last_rx = Clock::now();
     auto last_beat = Clock::now();
+    auto last_usb_check = Clock::now();
     auto consumer_gone_since = Clock::time_point{};
     auto window_start = Clock::now();
     uint64_t window_bytes = 0, window_frames = 0;
@@ -308,7 +424,11 @@ void Engine::RunSession(net::Socket& sock) {
         if (!cam) return false;
         MediaFormat chosen;
         const Snapshot s = Get();
-        if (!ChooseDeviceFormat(cam->formats, QualityFormat(s.quality, want), chosen)) return false;
+        MediaFormat request = QualityFormat(s.quality, want);
+        // Over Wi-Fi, Auto stays at 1080p (R11); an explicit preset is honoured.
+        if (wifi && s.quality == proto::Quality::Auto && request.height > 1080)
+            request = {1920, 1080, std::min<uint32_t>(request.fps, 60)};
+        if (!ChooseDeviceFormat(cam->formats, request, chosen)) return false;
         camera_id = cam->camera_id;
         proto::SetFormat sf;
         sf.width = static_cast<uint16_t>(chosen.width);
@@ -326,10 +446,10 @@ void Engine::RunSession(net::Socket& sock) {
 
     while (!stop_) {
         // 1. Read whatever the phone sent.
-        const int w = sock.WaitReadable(20);
+        const int w = link.WaitReadable(20);
         if (w < 0) break;
         if (w > 0) {
-            const int n = sock.RecvSome(buf);
+            const int n = link.RecvSome(buf);
             if (n <= 0) {
                 log::Info("device disconnected");
                 break;
@@ -447,6 +567,20 @@ void Engine::RunSession(net::Socket& sock) {
                         Notify();
                     }
                 }
+            } else if (auto wp = std::get_if<proto::WifiPaired>(&m)) {
+                if (wifi) continue;  // pairing is accepted over USB only
+                bool changed = false;
+                {
+                    std::lock_guard lock(mu_);
+                    changed = pairing_.Apply(link_serial_, *wp);
+                    if (changed) {
+                        SavePairingLocked();
+                        UpdateWifiSnapshotLocked();
+                    }
+                }
+                if (wp->status != proto::WifiPairStatus::Paired) log::Info("Wireless is off on the iPhone; not paired for Wi-Fi");
+                else if (changed) log::Info("paired with {} for Wi-Fi ({}:{})", wp->name, wp->address, wp->port);
+                if (changed) Notify();
             } else if (auto e = std::get_if<proto::Error>(&m)) {
                 log::Warn("device error {}: {}", unsigned(e->code), e->message);
                 if (e->code == proto::ErrorCode::CameraUnavailable || e->code == proto::ErrorCode::ThermalShutdown)
@@ -458,6 +592,15 @@ void Engine::RunSession(net::Socket& sock) {
         if (now - last_rx > kSilenceTimeout) {
             log::Warn("no data from device for 3 s; reconnecting");
             break;
+        }
+        if (wifi && opt_.wifi.empty() && now - last_usb_check >= kUsbCheck) {
+            last_usb_check = now;
+            const auto devices = usbmux::Client::ListDevices();
+            if (devices && std::any_of(devices->begin(), devices->end(),
+                                       [](const usbmux::Device& d) { return d.connection_type == "USB"; })) {
+                log::Info("iPhone connected by USB; switching from Wi-Fi");
+                break;
+            }
         }
 
         // 2. React to whether an app is reading the camera.

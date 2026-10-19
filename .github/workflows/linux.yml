@@ -33,13 +33,13 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates cmake make g++ pkg-config file dpkg-dev \
-            libavcodec-dev libavutil-dev libgtk-3-dev libayatana-appindicator3-dev
+            libavcodec-dev libavutil-dev libgtk-3-dev libayatana-appindicator3-dev libavahi-client-dev
       - name: Install build dependencies (Fedora)
         if: matrix.package == 'RPM'
         # ffmpeg-free decodes H.264 through OpenH264 or VA-API; RPM Fusion's ffmpeg-libs also satisfies it.
         run: |
           dnf install -y git cmake make gcc-c++ pkgconf-pkg-config rpm-build file \
-            ffmpeg-free-devel gtk3-devel libayatana-appindicator-gtk3-devel
+            ffmpeg-free-devel gtk3-devel libayatana-appindicator-gtk3-devel avahi-devel
       - uses: actions/checkout@v4
       - name: Configure
         run: cmake -S linux -B build/linux -DCMAKE_BUILD_TYPE=Release "-DTETHERCAM_BUILD_VERSION=${{ inputs.version }}" -DTETHERCAM_PACKAGE_TARGET=${{ matrix.target }}

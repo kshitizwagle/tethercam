@@ -13,7 +13,7 @@ namespace tethercam::agent {
 
 const char* StatusText(AgentStatus s) {
     switch (s) {
-    case AgentStatus::NoDevice: return "Waiting for iPhone (USB)";
+    case AgentStatus::NoDevice: return "Waiting for iPhone";
     case AgentStatus::AppNotOpen: return "Open Tethercam on your iPhone";
     case AgentStatus::Connected: return "Connected";
     case AgentStatus::Streaming: return "Streaming";
@@ -75,6 +75,28 @@ template <class F> void OnActivate(GtkWidget* item, F fn) {
         +[](gpointer p, GClosure*) { delete static_cast<F*>(p); }, GConnectFlags(0));
 }
 
+// Asks for the phone's Wi-Fi address; false if cancelled.
+bool AskAddress(std::string& value) {
+    GtkWidget* dialog = gtk_dialog_new_with_buttons("Tethercam Wi-Fi address", nullptr, GTK_DIALOG_MODAL, "_Cancel",
+                                                    GTK_RESPONSE_CANCEL, "_OK", GTK_RESPONSE_OK, nullptr);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
+    GtkWidget* box = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    gtk_container_set_border_width(GTK_CONTAINER(box), 12);
+    gtk_box_set_spacing(GTK_BOX(box), 8);
+    GtkWidget* label = gtk_label_new("iPhone address (host or IP, optional :port).\nLeave empty to find it automatically.");
+    gtk_label_set_xalign(GTK_LABEL(label), 0);
+    GtkWidget* entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(entry), value.c_str());
+    gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+    gtk_container_add(GTK_CONTAINER(box), label);
+    gtk_container_add(GTK_CONTAINER(box), entry);
+    gtk_widget_show_all(dialog);
+    const bool ok = gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK;
+    if (ok) value = gtk_entry_get_text(GTK_ENTRY(entry));
+    gtk_widget_destroy(dialog);
+    return ok;
+}
+
 GtkWidget* Submenu(GtkWidget* menu, const std::string& label) {
     GtkWidget* item = Item(menu, label);
     GtkWidget* sub = gtk_menu_new();
@@ -116,7 +138,8 @@ void Tray::Rebuild() {
     const Snapshot s = engine_.Get();
     const std::string device = engine_.CameraDevice();
     // Skip identical rebuilds (status JSON covers everything the menu shows, plus the device path).
-    const std::string key = agent::StatusJson(s) + device + std::to_string(s.cameras.size());
+    const std::string key =
+        agent::StatusJson(s) + device + std::to_string(s.cameras.size()) + s.wifi_phone + "|" + s.wifi_address;
     if (key == last_key_) return;
     last_key_ = key;
 
@@ -129,6 +152,8 @@ void Tray::Rebuild() {
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
     std::string status = StatusText(s.status);
     if (!s.device_name.empty()) status += ": " + s.device_name;
+    if (s.transport == "wifi") status += " (Wi-Fi)";
+    else if (s.transport == "usb") status += " (USB)";
     Item(menu, status, false);
     if (!s.detail.empty()) Item(menu, s.detail, false);
     Item(menu, device.empty() ? "No virtual camera (load v4l2loopback)" : "Camera device: " + device, false);
@@ -163,6 +188,19 @@ void Tray::Rebuild() {
             if (on) engine_.SetRotation(deg);
             else Refresh();
         });
+    }
+    GtkWidget* wireless = Submenu(menu, "Wireless");
+    if (s.wifi_phone.empty()) {
+        Item(wireless, "Not paired", false);
+        Item(wireless, "Turn on Wireless in the iPhone app, then connect by USB once", false);
+    } else {
+        Item(wireless, "Paired: " + s.wifi_phone, false);
+        const std::string addr = s.wifi_address.empty() ? "found automatically" : s.wifi_address;
+        OnActivate(Item(wireless, "Address: " + addr + "\u2026"), [this, current = s.wifi_address] {
+            std::string value = current;
+            if (AskAddress(value)) engine_.SetWifiAddress(value);
+        });
+        OnActivate(Item(wireless, "Forget Wi-Fi pairing"), [this] { engine_.ForgetWifi(); });
     }
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
     OnActivate(Item(menu, "Open log folder"), [this] {

@@ -7,6 +7,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showWireless = false
 
     var body: some View {
         ZStack {
@@ -17,6 +18,7 @@ struct ContentView: View {
             default: permissionDenied
             }
         }
+        .sheet(isPresented: $showWireless) { WirelessSheet(model: model) }
         .preferredColorScheme(.dark)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
@@ -52,11 +54,22 @@ struct ContentView: View {
     }
 
     private var topBar: some View {
-        HStack {
-            Spacer()
+        ZStack {
             StatusPill(text: model.liveText, live: model.stats.streaming, connected: model.stats.connected)
                 .rotationEffect(model.iconAngle)
-            Spacer()
+            HStack {
+                Spacer()
+                Button { showWireless = true } label: {
+                    Image(systemName: model.wireless ? "wifi" : "wifi.slash")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(model.wireless ? Color.yellow : .white)
+                        .frame(width: 44, height: 44)
+                        .rotationEffect(model.iconAngle)
+                }
+                .accessibilityLabel("Wireless")
+                .accessibilityValue(model.wireless ? "On" : "Off")
+                .padding(.trailing, 8)
+            }
         }
         .frame(height: 52)
     }
@@ -165,6 +178,52 @@ struct ContentView: View {
 }
 
 // MARK: Components
+
+/// Wireless settings: the opt-in toggle and the PCs paired over USB.
+private struct WirelessSheet: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("Wireless", isOn: Binding(get: { model.wireless }, set: { model.setWireless($0) }))
+                } footer: {
+                    Text("To pair a PC, turn this on and connect your iPhone to it with a USB cable once. After that, "
+                         + "Tethercam connects to that PC over Wi-Fi whenever the cable is unplugged. Both need to be on "
+                         + "the same network. Video is encrypted and only goes to PCs paired this way. A cable is faster "
+                         + "and more reliable.")
+                }
+                if model.wireless && !model.stats.wifiState.isEmpty {
+                    Section {
+                        Text(model.stats.wifiState).foregroundStyle(.orange)
+                        Button("Open Settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                        }
+                    }
+                }
+                Section("Paired PCs") {
+                    if model.pairedHosts.isEmpty {
+                        Text("None yet").foregroundStyle(.secondary)
+                    }
+                    ForEach(model.pairedHosts) { host in
+                        HStack {
+                            Text(host.name.isEmpty ? "PC" : host.name)
+                            Spacer()
+                            Button("Forget", role: .destructive) { model.forget(host) }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Wireless")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+}
 
 /// Buttons shrink slightly while pressed and spring back quickly.
 private struct PressScale: ButtonStyle {

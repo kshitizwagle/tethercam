@@ -47,7 +47,7 @@ Message DecodeOne(const std::vector<uint8_t>& frame) {
 
 }  // namespace
 
-TEST(Protocol, VectorsFileHasAllTypes) { EXPECT_EQ(LoadVectors().size(), 18u); }
+TEST(Protocol, VectorsFileHasAllTypes) { EXPECT_EQ(LoadVectors().size(), 20u); }
 
 TEST(Protocol, EveryVectorRoundTrips) {
     for (const auto& [name, bytes] : LoadVectors()) {
@@ -87,6 +87,19 @@ TEST(Protocol, VectorsDecodeToExpectedValues) {
 
     auto opts = std::get<SetOptions>(DecodeOne(v["set_options"]));
     EXPECT_EQ(opts.rotation, 90);
+
+    auto pair = std::get<WifiPair>(DecodeOne(v["wifi_pair"]));
+    EXPECT_EQ(pair.host_id[0], 0x00);
+    EXPECT_EQ(pair.host_id[15], 0xFF);
+    EXPECT_EQ(pair.key[31], 31);
+    EXPECT_EQ(pair.name, "P");
+
+    auto paired = std::get<WifiPaired>(DecodeOne(v["wifi_paired"]));
+    EXPECT_EQ(paired.status, WifiPairStatus::Paired);
+    EXPECT_EQ(paired.device_id[0], 0xFF);
+    EXPECT_EQ(paired.name, "I");
+    EXPECT_EQ(paired.port, kWifiPort);
+    EXPECT_EQ(paired.address, "10.1");
 }
 
 TEST(Protocol, ParserHandlesByteAtATimeDelivery) {

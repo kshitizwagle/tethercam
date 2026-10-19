@@ -41,6 +41,8 @@ void Usage() {
     std::puts(
         "Usage: tethercam-agent [options]\n"
         "  --tcp HOST:PORT     talk to fakephone over TCP instead of an iPhone over usbmuxd\n"
+        "  --wifi HOST[:PORT]  connect over Wi-Fi to the paired phone at this address\n"
+        "  --pairing-file P    Wi-Fi pairing file (default $XDG_CONFIG_HOME/tethercam/pairing)\n"
         "  --device /dev/videoN  v4l2loopback device (default: the one labelled \"Tethercam\")\n"
         "  --nv12              write NV12 instead of YUYV (smaller; not every app accepts it)\n"
         "  --software-decode   don't try VA-API\n"
@@ -67,6 +69,8 @@ int main(int argc, char** argv) {
             return argv[++i];
         };
         if (a == "--tcp") opt.tcp = next();
+        else if (a == "--wifi") opt.wifi = next();
+        else if (a == "--pairing-file") opt.pairing_file = next();
         else if (a == "--device") opt.device = next();
         else if (a == "--nv12") opt.pixel_format = agent::PixelFormat::Nv12;
         else if (a == "--software-decode") opt.prefer_hardware_decode = false;

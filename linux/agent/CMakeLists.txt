@@ -6,9 +6,19 @@ add_library(tcam_linux_media STATIC decoder.cpp encoder.cpp)
 target_include_directories(tcam_linux_media PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(tcam_linux_media PUBLIC tcam_common PkgConfig::FFMPEG)
 
-add_library(tcam_linux_agent STATIC engine.cpp settings.cpp v4l2_output.cpp)
+add_library(tcam_linux_agent STATIC engine.cpp settings.cpp v4l2_output.cpp discovery.cpp)
 target_include_directories(tcam_linux_agent PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(tcam_linux_agent PUBLIC tcam_common tcam_linux_media)
+
+# Bonjour discovery of Wi-Fi phones through avahi-daemon (M11). Optional: without it the agent uses
+# the address the phone reported over USB or the one the user entered.
+pkg_check_modules(AVAHI IMPORTED_TARGET avahi-client)
+if(AVAHI_FOUND)
+    target_compile_definitions(tcam_linux_agent PRIVATE TETHERCAM_AVAHI)
+    target_link_libraries(tcam_linux_agent PUBLIC PkgConfig::AVAHI)
+else()
+    message(WARNING "avahi-client not found: building without Bonjour discovery")
+endif()
 
 add_executable(tethercam-agent main.cpp)
 target_link_libraries(tethercam-agent PRIVATE tcam_linux_agent)

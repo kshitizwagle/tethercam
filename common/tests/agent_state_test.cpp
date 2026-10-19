@@ -11,7 +11,7 @@ TEST(StatusJson, IdleMatchesContract) {
     EXPECT_EQ(agent::StatusJson(s),
               std::string(R"({"state":"no_iphone","live":false,"device":"","camera":"","lens":"","width":0,"height":0,)"
                           R"("fps":0,"mirror":false,"rotation":0,"detail":"","thermal":-1,"battery":-1,"charging":false,)"
-                          R"("version":")") + std::string(Version()) + R"(","quality":"Auto"})");
+                          R"("version":")") + std::string(Version()) + R"(","quality":"Auto","transport":""})");
 }
 
 TEST(StatusJson, LiveWithSelectedLens) {
@@ -34,6 +34,8 @@ TEST(StatusJson, LiveWithSelectedLens) {
     EXPECT_NE(j.find(R"("device":"Kshitiz's \"iPhone\"")"), std::string::npos) << j;
     EXPECT_NE(j.find(R"("camera":"Back Ultra Wide","lens":"ultra_wide")"), std::string::npos) << j;
     EXPECT_NE(j.find(R"("quality":"4K / 30 fps")"), std::string::npos) << j;
+    s.transport = "wifi";
+    EXPECT_NE(agent::StatusJson(s).find(R"("transport":"wifi")"), std::string::npos);
 }
 
 TEST(StatusJson, StreamingWithoutFramesIsNotLive) {

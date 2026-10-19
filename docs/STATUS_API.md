@@ -39,7 +39,7 @@ status card is opt-in from the tray menu), so the overlay decides what viewers s
 
 | Field | Meaning |
 |---|---|
-| `state` | `live` (video flowing), `connected` (phone connected, no app using the camera), `no_iphone` (no iPhone on USB), `app_not_open` (iPhone found, Tethercam app closed/locked), `paused` (app in background or phone locked), `no_apple_driver` (Apple Devices not installed), `starting` |
+| `state` | `live` (video flowing), `connected` (phone connected, no app using the camera), `no_iphone` (no iPhone on USB and no paired phone reachable over Wi-Fi), `app_not_open` (iPhone found, Tethercam app closed/locked), `paused` (app in background or phone locked), `no_apple_driver` (Apple Devices not installed), `starting` |
 | `live` | `true` only while frames are flowing. **Use this to show/hide your camera frame** |
 | `device` | iPhone name |
 | `camera` | Human-readable camera label; empty before a camera is selected |
@@ -49,6 +49,7 @@ status card is opt-in from the tray menu), so the overlay decides what viewers s
 | `detail` | Human-readable summary |
 | `thermal`, `battery`, `charging` | iPhone thermal state (0 nominal, 1 fair, 2 serious, 3 critical; -1 unknown), battery percent (-1 unknown), charging. Updated every 2 s while live |
 | `version` | Agent build version, Windows or Linux (the example is illustrative) |
+| `transport` | `usb` or `wifi` while a phone is connected, empty otherwise (M11; older agents omit this field) |
 | `quality` | Selected capture preference: `Auto`, `1080p / 30 fps`, `1080p / 60 fps`, `4K / 30 fps`, `4K / 60 fps`. Actual source dimensions and measured fps remain in `width`, `height`, `fps`; older agents omit this field |
 
 ## Timing and connection behavior

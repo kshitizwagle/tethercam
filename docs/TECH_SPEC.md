@@ -6,7 +6,9 @@ Status: draft v1 · Owner: project maintainers · Related: [PRODUCT.md](PRODUCT.
 ## 1. Scope
 
 Tethercam streams video from an iPhone camera to a Windows 11 or Linux PC over USB and exposes it as a
-system webcam. Linux support is milestone M9 (§13). v1 is video only, H.264, wired only. See [PRODUCT.md](PRODUCT.md) for goals and non-goals.
+system webcam. Linux support is milestone M9 (§13). v1 is video only, H.264. USB is the default
+transport; an opt-in, paired, encrypted Wi-Fi transport is milestone M11 (§14). See
+[PRODUCT.md](PRODUCT.md) for goals and non-goals.
 
 ## 2. Requirements
 
@@ -23,6 +25,9 @@ system webcam. Linux support is milestone M9 (§13). v1 is video only, H.264, wi
 | F7 | The user can switch lens, mirror and rotation from the tray menu or the phone. |
 | F8 | With no phone connected, the virtual camera stays usable and shows a "Connect your iPhone" placeholder frame. |
 | F9 | Unplug/replug, phone lock/unlock and app restart recover automatically. |
+| F10 | (M11) With Wireless turned on in the phone app, a paired PC finds the phone on the local network (Bonjour, or a saved `host:port`) and streams over Wi-Fi. |
+| F11 | (M11) Pairing happens over USB: the first USB session with Wireless on exchanges a shared key, with no code or prompt (the USB link is already trusted through "Trust This Computer"). Wi-Fi only works for PCs paired this way. Either side can forget a pairing. |
+| F12 | (M11) USB wins: when a USB link to the phone exists, the agent uses it, and it drops a Wi-Fi session when a cable is plugged in. |
 
 ### 2.2 Non-functional
 
@@ -31,8 +36,8 @@ system webcam. Linux support is milestone M9 (§13). v1 is video only, H.264, wi
 | N1 | Glass-to-glass latency < 100 ms at 1080p30 and < 150 ms at 4K30 (measured with an on-screen clock). |
 | N2 | Recovery < 3 s after replug or unlock. |
 | N3 | Agent CPU < 5 % at 1080p30 on a 4-core laptop with a hardware decoder. Memory flat over 1 h. |
-| N4 | No network traffic beyond the loopback connection to usbmuxd. No telemetry. |
-| N5 | The iOS listener must not be reachable over Wi-Fi or cellular. |
+| N4 | No internet traffic and no telemetry. Over USB, the only socket is the loopback connection to usbmuxd. Over Wi-Fi (M11), the agent only makes outbound TCP connections to a paired phone on the local network, plus mDNS queries through the OS resolver. |
+| N5 | The USB listener (5321) binds to loopback only. The Wi-Fi listener (5322, M11) runs only while the user has Wireless turned on, never on cellular, and only completes a session with a host paired over USB. Pairing never happens over the network. Video never leaves the phone unencrypted over the network. |
 | N6 | A crash in the agent must never crash Frame Server or the consuming app. The vcam falls back to the placeholder. |
 
 ### 2.3 Platform requirements
@@ -214,8 +219,12 @@ polls for it every 500 ms, so it's idle exactly when no consumer exists.
 
 ## 10. Security and privacy
 
-- No outbound network. The only socket the agent opens is to 127.0.0.1:27015.
-- The iOS listener binds to loopback only (N5).
+- No outbound network over USB. The only socket the agent opens is to 127.0.0.1:27015.
+- The iOS USB listener binds to loopback only (N5).
+- Wi-Fi (M11, §14): opt-in on the phone; pairing only over the trusted USB link (a random 256-bit key
+  per PC–phone pair); every Wi-Fi session is a Noise `NNpsk0` handshake on that key, then
+  ChaCha20-Poly1305 records. A failed handshake or a bad record tag closes the connection. Keys live in
+  the iOS Keychain, a DPAPI-protected file on Windows and a 0600 file on Linux.
 - The vcam DLL parses nothing from the network. It only copies NV12 bytes with bounds-checked sizes from a
   header it validates (magic, version, dimensions ≤ 4096×2160, offsets inside the mapping).
 - All protocol parsing has length checks and is covered by fuzz-style unit tests.
@@ -233,6 +242,8 @@ polls for it every 500 ms, so it's idle exactly when no consumer exists.
 | R8 v4l2loopback is an out-of-tree kernel module (Secure Boot signing, kernel upgrades) | Camera missing on Linux | Depend on the distro's `v4l2loopback-dkms`; the agent detects a missing `/dev/video*` loopback device and says how to fix it; document MOK enrolment for Secure Boot |
 | R9 v4l2loopback has no per-open media-type negotiation like Frame Server | Linux can't honour F5 per app | The agent picks the output format from the tray/quality setting; consumers get that size. Scaling stays in the agent |
 | R10 The vcam's free-running sample timer beats against the phone's frame cadence (both 60 Hz) | 12–30 % of frames repeated and skipped through Frame Server, even idle | **Resolved 2026-10-16** (perf.md): each sample has a one-interval window on a fixed cadence and goes out as soon as a new frame arrives in it, repeating only at the window's end. load24 0–0.2 % loss, idle 60.0 fps |
+| R11 Wi-Fi jitter, latency and throughput (2.4 GHz, busy channels, power save) | Stutter, higher latency | Auto quality caps at 1080p60 over Wi-Fi; existing iOS backpressure drops to the next IDR; USB preferred whenever present; measure latency and frame loss vs USB in M11 |
+| R12 Bugs in our own handshake code | Video readable or injectable on the LAN | Standard constructions only (Noise `NNpsk0`; no pairing over the network at all) on one audited library (Monocypher) on all three platforms; published test vectors, shared golden vectors, fuzzed record/preamble parsers |
 | R7 4K60 NV12 copy cost (~750 MB/s) | CPU/latency | Measure in M5; optimize with shared D3D11 textures (`IDXGIResource1::CreateSharedHandle`) if needed |
 
 ## 12. Open questions
@@ -245,6 +256,8 @@ polls for it every 500 ms, so it's idle exactly when no consumer exists.
 | Q4 | Can the agent change the stream size mid-session without the consumer re-opening the camera, e.g. on a lens switch with a different max size? | **Answered by design:** the agent always delivers the consumer's size and scales/letterboxes whatever the phone sends (implemented) |
 | Q6 | How does the Linux agent learn that a client opened the camera (F6)? | **Answered 2026-10-15:** the agent scans `/proc/*/fd` every 500 ms for other processes holding the device (works on every v4l2loopback version; verified with `v4l2-ctl` on 0.15.3: start on open, stop 2 s after close). Processes in a hidden PID namespace aren't seen; `--always-on` covers that. The v4l2loopback client-usage event is a possible refinement |
 | Q7 | Does `usbmuxd` on Linux handle the Trust/pairing prompt without extra tools? | Open (needs a real iPhone on Linux). The agent only needs usbmuxd's `Connect`, which works once the phone is paired; `idevicepair pair` is the documented fallback |
+| Q8 | Does Windows `DnsServiceBrowse` (and Avahi on Linux) see the iPhone's `_tethercam._tcp` advert reliably, including on networks with client isolation or mDNS filtering? | Partly answered 2026-10-19: `DnsServiceBrowse` resolves a `DnsServiceRegister` advert (fakephone `--advertise`) with its TXT id. iPhone adverts, Avahi and filtered networks need the device test; the reported and manual addresses cover failures |
+| Q9 | When exactly does iOS show the Local Network prompt (on `NWListener` start with a Bonjour service?), and what does the listener report while it's denied? | M11 device test; the app must explain a denied permission |
 | Q5 | Can App Store distribution happen without a paid developer account? (Not needed for development: free accounts can sideload for 7 days.) | Before M7 |
 
 ## 13. Linux host (M9)
@@ -268,3 +281,49 @@ reaches `/var/run/usbmuxd` by default on Linux; the status types, status JSON an
 shared). `linux/agent` holds the Linux-only parts; its session loop mirrors `windows/agent/engine.cpp`
 (keep the two in step until a shared engine exists). Packages are built per distro release because each
 links that release's FFmpeg ABI.
+
+## 14. Wireless transport (M11)
+
+Same phone app, same TCAM v1 protocol, same vcam and Status API; only the link under the protocol changes.
+
+```
+USB:  agent ─ usbmuxd ─ phone 127.0.0.1:5321 ─ TCAM v1 (plaintext inside the USB tunnel)
+WiFi: agent ─ TCP ─ phone <wifi-ip>:5322 ─ preamble ─ Noise NNpsk0 ─ encrypted records ─ TCAM v1
+```
+
+- **Phone:** a second `NWListener` on port 5322, started only while Wireless is on, requiring the `.wifi`
+  or `.wiredEthernet` interface (cellular prohibited). It advertises `_tethercam._tcp` with TXT `v=1` and
+  `id` (the phone's random device ID in hex). Info.plist needs `NSLocalNetworkUsageDescription`
+  and `NSBonjourServices`. One client at a time, as over USB; a USB connection replaces a Wi-Fi one.
+- **Crypto library:** Monocypher 4.x (BSD-2-Clause / CC0), vendored in `third_party/monocypher/` and
+  compiled into `common/` and the iOS app, so all three platforms run the same primitives and share
+  golden vectors (`docs/protocol-vectors/wifi-v1.txt`).
+- **Pairing (over USB only):** in every USB session the host sends `WifiPair` (PROTOCOL 0x40) with its
+  16-byte host ID, its name and a random 32-byte key it keeps for this phone (generated on first use,
+  stored under the phone's USB serial). If Wireless is on, the phone stores host ID → key and replies
+  `WifiPaired` (0x41) with its own ID, name, Wi-Fi port and current Wi-Fi address; if Wireless is off it replies "off" and keeps
+  the offer in memory, accepting it if the user turns Wireless on during that USB session. Resending is
+  idempotent and refreshes the phone's last known address. No codes, no prompts: the USB link is already
+  trusted through iOS's "Trust This Computer".
+- **Sessions:** Noise `NNpsk0_25519_ChaChaPoly_BLAKE2b` on the pairing key (both sides prove they hold
+  it; fresh ephemeral keys give forward secrecy), then length-prefixed ChaCha20-Poly1305 records carrying
+  the TCAM byte stream. The preamble names the host ID so the phone picks the key. Byte layouts are in
+  [PROTOCOL.md § Wireless transport](PROTOCOL.md#wireless-transport-m11).
+- **Discovery on the PC:** Windows `DnsServiceBrowse`/`DnsServiceResolve` (windns.h,
+  `windows/agent/discovery.cpp`); Linux `libavahi-client` (`linux/agent/discovery.cpp`; optional at build
+  time, the .deb recommends `avahi-daemon`). Browsing starts only once a phone is paired. The agent tries the address the phone reported over USB,
+  then Bonjour; a manual `host:port` can be saved per paired phone (Q8).
+- **Agent:** sessions run over a `Link` (plain socket for USB and `--tcp`, encrypted for Wi-Fi), so the
+  session loop is unchanged. USB is tried first; during a Wi-Fi session the agent checks usbmuxd every
+  2 s and ends the Wi-Fi session when a USB device appears (F12). Auto quality caps at 1080p60 over
+  Wi-Fi (R11). There is no pairing UI on the PC beyond showing the paired phone and Forget.
+- **Status API:** additive `transport` field (`usb` / `wifi`); `live`, `/events` and port 4790 unchanged.
+- **Pairing storage on the PC:** `common/src/pairing.cpp`: host ID plus one record per phone (USB serial,
+  key, device ID, name, reported and manual address); DPAPI-protected `%LOCALAPPDATA%\Tethercam\pairing.bin`
+  on Windows, `$XDG_CONFIG_HOME/tethercam/pairing` (0600) on Linux. `--pairing-file` overrides it.
+- **Testing without a phone:** the plain fakephone port stands in for USB and answers `WifiPair`; its Wi-Fi
+  port (`--wifi-port`, default 5322; `--wireless-off` to refuse) speaks the encrypted transport, and
+  `--advertise` publishes it over Bonjour (Windows). `tethercam-agent --wifi host[:port]` forces a Wi-Fi
+  address. Verified 2026-10-19 on Windows: pair over `--tcp`, then a fresh agent found the phone through
+  Bonjour and streamed 1080p30 through the vcam at 30.0 new fps, no gaps > 50 ms, Status API
+  `"transport":"wifi"`.
