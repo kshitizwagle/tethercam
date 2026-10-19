@@ -127,6 +127,11 @@ Empty payloads.
 | `rotation` | u16 | 0, 90, 180, 270 degrees, applied on the device |
 | `dim_preview` | u8 | 0/1, dim or blank the on-phone preview |
 
+Also sent device → host (app 0.1.17+) so the mirror choice is shared: after `Hello` and before `Caps` when
+the phone has a saved choice, and whenever mirror is toggled on the phone. The host takes only `mirror`
+(it ignores `rotation` and `dim_preview` from the device), unless its own mirror change hasn't reached the
+phone yet (the same rule as `SetQuality`). Hosts send `SetOptions` only after `Caps`. Older hosts ignore it.
+
 ### 0x20 VideoConfig
 
 Sent before the first `VideoFrame` and again whenever the codec parameters change (new format, lens or

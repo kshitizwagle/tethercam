@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CMonocypher)
+import CMonocypher  // SwiftPM/xtool build; Xcode uses the bridging header
+#endif
 
 /// Noise_NNpsk0_25519_ChaChaPoly_BLAKE2b on Monocypher (third_party/monocypher, through the bridging
 /// header). Mirrors common/src/noise.cpp; both pass the same public test vector. Platform-neutral.

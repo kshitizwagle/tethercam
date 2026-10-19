@@ -46,6 +46,8 @@ void Engine::Start(std::function<void()> on_change) {
         const int quality = std::atoi(settings_.Get("Quality").c_str());
         snap_.quality = quality >= 0 && quality <= 4 ? proto::Quality(quality) : proto::Quality::Auto;
         quality_dirty_ = settings_.Get("QualityPending") == "1";
+        mirror_dirty_ = settings_.Get("MirrorPending") == "1";
+        options_dirty_ = mirror_dirty_.load();
         pairing_ = wifi::PairingStore(opt_.pairing_file.empty() ? wifi::PairingStore::DefaultPath() : opt_.pairing_file);
         if (!pairing_.Load()) log::Warn("cannot read the Wi-Fi pairing file; starting without pairings");
         UpdateWifiSnapshotLocked();
@@ -133,6 +135,8 @@ void Engine::SetMirror(bool mirror) {
         snap_.mirror = mirror;
     }
     settings_.Set("Mirror", mirror ? "1" : "0");
+    settings_.Set("MirrorPending", "1");
+    mirror_dirty_ = true;
     options_dirty_ = true;
     Notify();
 }
@@ -488,6 +492,19 @@ void Engine::RunSession(Link& link) {
                     }
                 }
                 Notify();
+            } else if (auto opts = std::get_if<proto::SetOptions>(&m)) {
+                // The phone's mirror (saved there, or toggled on the phone); rotation and dimming stay ours.
+                // An offline PC choice wins the next connection, like quality.
+                bool changed = false;
+                {
+                    std::lock_guard lock(mu_);
+                    if (!mirror_dirty_ && snap_.mirror != (opts->mirror != 0)) {
+                        snap_.mirror = opts->mirror != 0;
+                        settings_.Set("Mirror", snap_.mirror ? "1" : "0");
+                        changed = true;
+                    }
+                }
+                if (changed) Notify();
             } else if (auto caps = std::get_if<proto::Caps>(&m)) {
                 {
                     std::lock_guard lock(mu_);
@@ -650,9 +667,11 @@ void Engine::RunSession(Link& link) {
         }
         // Black frames whenever no decoded frame went out recently (not streaming, paused, stalled).
         FeedIdle();
-        if (options_dirty_.exchange(false)) {
+        // After Caps: by then the phone has announced its saved mirror, so we never send a stale one.
+        if (have_caps && options_dirty_.exchange(false)) {
             Snapshot s = Get();
-            send(proto::SetOptions{uint8_t(s.mirror), s.rotation, 0});
+            if (send(proto::SetOptions{uint8_t(s.mirror), s.rotation, 0}) && mirror_dirty_.exchange(false))
+                settings_.Set("MirrorPending", "0");
         }
 
         // 3. Status and heartbeats.

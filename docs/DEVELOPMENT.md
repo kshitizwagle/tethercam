@@ -79,6 +79,16 @@ The project file is generated; never commit `Tethercam.xcodeproj`. On Windows, t
 compile platform-neutral code (e.g. `ios/Tethercam/Protocol/Wire.swift`, `swiftc -swift-version 6`) to
 check the protocol against the golden vectors; UIKit/AVFoundation code only builds in macOS CI.
 
+On Linux, [xtool](https://github.com/xtool-org/xtool) builds, signs and installs the app from the repo root
+(`Package.swift` + `xtool.yml`; needs `xtool setup` once for the Darwin SDK and Apple ID):
+
+```
+xtool dev run -c release --usb     # or: xtool dev build -c release --ipa
+```
+
+The package builds the same sources as `ios/project.yml` (no tests); `ios/xtool/Info.plist` repeats the
+project's info properties, so keep the two in step.
+
 ## Running a development build
 
 The camera's COM server must be registered machine-wide, and the DLL must be somewhere the FrameServer

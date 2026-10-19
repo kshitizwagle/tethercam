@@ -96,6 +96,7 @@ private:
     std::atomic<bool> options_dirty_{false};
     std::atomic<bool> camera_dirty_{false};
     std::atomic<bool> quality_dirty_{false};
+    std::atomic<bool> mirror_dirty_{false};  // a PC mirror change the phone hasn't been sent yet
 
     wifi::PairingStore pairing_;                  // guarded by mu_
     std::unique_ptr<wifi::Discovery> discovery_;  // started once a phone is paired

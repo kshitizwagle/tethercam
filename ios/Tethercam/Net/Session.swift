@@ -31,7 +31,16 @@ final class Session: @unchecked Sendable {
     private var cameraId: UInt8 = UInt8(clamping: UserDefaults.standard.integer(forKey: Session.cameraKey)) {
         didSet { UserDefaults.standard.set(Int(cameraId), forKey: Session.cameraKey) }
     }
-    private var mirror = false
+    private static let mirrorKey = "mirror"
+    private static let dimKey = "dimPreview"
+    /// Last mirror choice, made on the phone or the PC; nil until there is one (the PC's applies).
+    private var savedMirror: Bool? = UserDefaults.standard.object(forKey: Session.mirrorKey) as? Bool
+    private var mirror = UserDefaults.standard.bool(forKey: Session.mirrorKey) {
+        didSet {
+            savedMirror = mirror
+            UserDefaults.standard.set(mirror, forKey: Session.mirrorKey)
+        }
+    }
     private var rotation: UInt16 = 0
     private var format = (width: UInt16(1920), height: UInt16(1080), fps: UInt16(30))
     private var requestedBitrate: UInt32 = 0
@@ -95,6 +104,7 @@ final class Session: @unchecked Sendable {
             server.onWifiState = { [weak self] text in self?.update { $0.wifiState = text } }
             server.keyLookup = { [pairings] id in pairings.key(for: id) }
             server.deviceIdHex = pairings.deviceIdHex
+            camera.setOptions(mirror: mirror, rotation: rotation)
             server.start()
             server.setWifi(enabled: wireless)
             startTimers()
@@ -125,6 +135,10 @@ final class Session: @unchecked Sendable {
     /// Lens in use when the app starts (remembered from last time).
     var initialCamera: UInt8 { queue.sync { cameraId } }
     var initialQuality: CaptureQuality { queue.sync { quality } }
+    var initialMirror: Bool { queue.sync { mirror } }
+    /// "Hide preview" is phone-only; kept across launches.
+    var initialDimmed: Bool { UserDefaults.standard.bool(forKey: Self.dimKey) }
+    func rememberDimmed(_ on: Bool) { UserDefaults.standard.set(on, forKey: Self.dimKey) }
     var initialWireless: Bool { queue.sync { wireless } }
 
     /// Wireless toggled on the phone. Turning it on during a USB session accepts that PC's pending offer.
@@ -179,6 +193,8 @@ final class Session: @unchecked Sendable {
         queue.async { [self] in
             mirror = on
             camera.setOptions(mirror: mirror, rotation: rotation)
+            // The PC keeps the same choice (it ignores rotation and dimming from the phone).
+            if server.isConnected { send(.setOptions(mirror: on, rotation: rotation, dimPreview: false)) }
         }
     }
 
@@ -210,6 +226,7 @@ final class Session: @unchecked Sendable {
                     name: device.name, model: Self.modelIdentifier()))
         // Announce the saved preference before Caps so the host's first Start uses it.
         send(.setQuality(quality))
+        if let m = savedMirror { send(.setOptions(mirror: m, rotation: rotation, dimPreview: false)) }
         send(.caps(cameras: camera.cameras, codecs: 1))
         let transport = server.isWifi ? "Wi-Fi" : "USB"
         update { $0.connected = true; $0.message = "Connected"; $0.transport = transport }

@@ -8,7 +8,9 @@ final class AppModel: ObservableObject {
     @Published var cameras: [CameraInfo] = []
     @Published var selectedCamera: UInt8 = 0
     @Published var mirrored = false
-    @Published var dimmed = false
+    @Published var dimmed = false {
+        didSet { if dimmed != oldValue { session.rememberDimmed(dimmed) } }
+    }
     @Published var quality: CaptureQuality = .auto
     @Published var wireless = false
     @Published var pairedHosts: [WifiPairings.Host] = []
@@ -59,6 +61,8 @@ final class AppModel: ObservableObject {
         started = true
         cameras = session.camera.cameras
         quality = session.initialQuality
+        mirrored = session.initialMirror
+        dimmed = session.initialDimmed
         session.onQualityChange = { [weak self] value in self?.quality = value }
         let remembered = session.initialCamera
         selectedCamera = cameras.contains(where: { $0.id == remembered }) ? remembered : (cameras.first?.id ?? 0)

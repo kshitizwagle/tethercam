@@ -55,3 +55,4 @@ Linux: `cd linux && cmake --preset linux && cmake --build --preset debug && ctes
 (needs libavcodec-dev, libavutil-dev; tray: libgtk-3-dev, libayatana-appindicator3-dev). On Linux, test with
 `fakephone --port 5321` + `tethercam-agent --tcp 127.0.0.1:5321` and any reader of the v4l2loopback device.
 iOS (on a Mac): `cd ios && xcodegen && xcodebuild -scheme Tethercam -destination 'generic/platform=iOS' build`
+iOS (on Linux, xtool): `xtool dev run -c release --usb` from the repo root builds, signs and installs on the iPhone

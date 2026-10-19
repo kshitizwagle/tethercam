@@ -1,0 +1,7 @@
+# xtool build of the iPhone app (see Package.swift). Same bundle ID as the CI build, so a local build
+# replaces the installed app and keeps its settings and Wi-Fi pairings.
+version: 1
+bundleID: org.tethercam.app
+product: Tethercam
+infoPath: ios/xtool/Info.plist
+iconPath: ios/Tethercam/Assets.xcassets/AppIcon.appiconset/icon.png
