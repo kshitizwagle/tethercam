@@ -4,7 +4,12 @@ M11 adds a Wi-Fi transport. You pair the phone once over USB, and after that it 
 cable unplugged. The design is in [docs/TECH_SPEC.md](docs/TECH_SPEC.md) §14, the wire format in
 [docs/PROTOCOL.md](docs/PROTOCOL.md) ("Wireless"), and the checklist under M11 in
 [MILESTONES.md](MILESTONES.md) and [TODO.md](TODO.md). The code is in the commit "M11 (wip)". It is written for
-all three platforms, but only the Windows side has been built and run.
+all three platforms. CI run 39188903816 (released as v0.1.15) built everything and passed all tests:
+- Windows: 60/60
+- Linux: 52/52 on Ubuntu 24.04/26.04 and Fedora, with Avahi found
+- iOS: app build plus XCTest, including `NoiseTests`
+
+What's left is the runtime and device checks below.
 
 ## What is verified (Windows PC, 2026-10-19)
 - `ctest --preset debug`: 60/60 pass. Coverage:
@@ -20,7 +25,7 @@ all three platforms, but only the Windows side has been built and run.
   Windows. They pass the same vector, the record checks and the refusal checks.
 
 ## Linux: still to do
-Nothing under `linux/` has been compiled. The Linux side shares `common/` (noise, link, pairing) with Windows,
+The code compiles and its tests pass in CI, but the agent has never been run on Linux. The Linux side shares `common/` (noise, link, pairing) with Windows,
 so most risk is in the Linux-only files.
 
 1. Build and test:
@@ -44,7 +49,7 @@ so most risk is in the Linux-only files.
 4. Packaging: the .deb recommends `avahi-daemon` (`linux/CMakeLists.txt`). The .rpm may want the same.
 
 ## iOS: still to do (on a Mac or in CI)
-The app has not been built. CI (`ios.yml`) is the first real compile.
+The app builds and its tests pass in CI (`ios.yml`). It has not been run on a device.
 
 1. Build:
    ```
