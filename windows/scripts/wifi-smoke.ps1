@@ -1,11 +1,11 @@
 # End-to-end Wi-Fi check without an iPhone (M11), run by CI on every Windows build:
 #   1. fakephone + agent --tcp: the plain port stands in for USB, so the agent pairs (WifiPair/WifiPaired)
-#      and writes the key to a pairing file.
+#      and writes the key to a pairing file; frames read over this link are the machine's baseline.
 #   2. A fresh agent with the same pairing file and no --tcp: usbmuxd is absent, so it falls back to
 #      Wi-Fi (Bonjour advert, then the address fakephone reported), opens the encrypted session, and the
 #      status API must report "transport":"wifi".
 #   3. vcamcheck direct loads the camera in-process (Local shm namespace, no registration or admin) and
-#      reads frames: they must be new frames from the phone, not black.
+#      reads frames: they must be new frames from the phone, at least half the baseline rate.
 #
 #   powershell -ExecutionPolicy Bypass -File windows\scripts\wifi-smoke.ps1 [-Build build\vs2026-x64] [-Configuration Release]
 #
@@ -15,7 +15,7 @@ param(
     [string]$Configuration = "Release",
     [string]$Size = "1920x1080",
     [int]$Fps = 30,
-    [int]$Seconds = 6
+    [int]$Seconds = 10
 )
 $ErrorActionPreference = "Stop"
 
@@ -66,19 +66,45 @@ function Show-Logs {
     }
 }
 
-$fail = @()
+$script:fail = @()
+# Opens the camera in-process for $Seconds (opening it is what makes the phone stream) and returns the
+# new-frame rate. The status API must report live over $transport while frames flow (the phone stops
+# 2 s after the camera closes, so it is checked during the read, not after).
+function Read-Camera($transport) {
+    $name = "vcamcheck-$transport"
+    $reader = Start-Tool $vcamcheckExe @("direct", "--dll", $vcamDll, "--size", $Size, "--fps", $Fps, "--frames", ($Seconds * $Fps)) $name
+    $null = $reader.Handle  # keeps ExitCode readable after exit
+    $sawLive = $false
+    while (-not $reader.HasExited) {
+        $s = Get-Status
+        if ($s -and $s.live -and $s.transport -eq $transport) { $sawLive = $true }
+        Start-Sleep -Milliseconds 300
+    }
+    $reader.WaitForExit()
+    $text = (Get-Content (Join-Path $outDir "$name.out") -Raw) + (Get-Content (Join-Path $outDir "$name.err") -Raw)
+    Write-Host $text
+    if ($reader.ExitCode -ne 0) { $script:fail += "vcamcheck over $transport exited with $($reader.ExitCode)" }
+    if (-not $sawLive) { $script:fail += "the status API never reported live over $transport while the camera was read" }
+    $n = [regex]::Match($text, 'new frames \d+: ([0-9.]+) fps, gaps > 50 ms ([0-9.]+) %.*longest gap ([0-9]+) ms')
+    if (-not $n.Success) { $script:fail += "cannot parse vcamcheck output over $transport"; return 0.0 }
+    Write-Host ("over {0}: {1} new fps of {2}, gaps > 50 ms {3} %, longest {4} ms" -f $transport, $n.Groups[1].Value, $Fps, $n.Groups[2].Value, $n.Groups[3].Value)
+    return [double]$n.Groups[1].Value
+}
+
 try {
     Stop-Harness
     Start-Sleep -Seconds 1
     $null = Start-Tool $fakephoneExe @("--port", "5321", "--wifi-port", "5322", "--advertise") "fakephone"
 
-    # 1. Pair over the stand-in USB link.
-    $pairAgent = Start-Tool $agentExe @("--console", "--tcp", "127.0.0.1:5321", "--pairing-file", $pairingFile) "agent-pair"
-    if (-not (Wait-Log "agent-pair" "paired with .* for Wi-Fi" 20)) { Show-Logs; throw "the agent did not pair over --tcp" }
+    # 1. Pair over the stand-in USB link, and stream over it once as the baseline for this machine
+    #    (CI runners have no GPU: fakephone encodes and the agent decodes in software).
+    $usbAgent = Start-Tool $agentExe @("--console", "--tcp", "127.0.0.1:5321", "--pairing-file", $pairingFile) "agent-usb"
+    if (-not (Wait-Log "agent-usb" "paired with .* for Wi-Fi" 20)) { Show-Logs; throw "the agent did not pair over --tcp" }
     if (-not (Test-Path $pairingFile)) { Show-Logs; throw "pairing reported but $pairingFile was not written" }
     Write-Host "paired over the stand-in USB link"
-    Stop-Process -Id $pairAgent.Id -Force
-    Start-Sleep -Seconds 1
+    $usbFps = Read-Camera "usb"
+    Stop-Process -Id $usbAgent.Id -Force
+    Start-Sleep -Seconds 3  # let fakephone stop before the next host connects
 
     # 2. Fresh agent, same pairing, no USB: must come up over Wi-Fi.
     $null = Start-Tool $agentExe @("--console", "--pairing-file", $pairingFile) "agent-wifi"
@@ -92,32 +118,14 @@ try {
         Show-Logs; throw "the agent never reported transport=wifi (last status: $($status | ConvertTo-Json -Compress))"
     }
     $how = if (Select-String -Path (Join-Path $outDir "agent-wifi.err") -Pattern "Bonjour: " -Quiet) { "found by Bonjour" } else { "reported address (no Bonjour result)" }
-    Write-Host "connected over Wi-Fi ($how): $($status | ConvertTo-Json -Compress)"
+    Write-Host "connected over Wi-Fi ($how)"
 
-    # 3. Read frames through the camera; opening it is what makes the phone stream.
-    # The status must say live over Wi-Fi while frames flow (the phone stops 2 s after the camera closes).
-    $reader = Start-Tool $vcamcheckExe @("direct", "--dll", $vcamDll, "--size", $Size, "--fps", $Fps, "--frames", ($Seconds * $Fps)) "vcamcheck"
-    $null = $reader.Handle  # keeps ExitCode readable after exit
-    $sawLive = $false
-    while (-not $reader.HasExited) {
-        $s = Get-Status
-        if ($s -and $s.live -and $s.transport -eq "wifi") { $sawLive = $true }
-        Start-Sleep -Milliseconds 300
-    }
-    $reader.WaitForExit()
-    $text = (Get-Content (Join-Path $outDir "vcamcheck.out") -Raw) + (Get-Content (Join-Path $outDir "vcamcheck.err") -Raw)
-    Write-Host $text
-    if ($reader.ExitCode -ne 0) { $fail += "vcamcheck direct exited with $($reader.ExitCode)" }
-    if (-not $sawLive) { $fail += "the status API never reported live over Wi-Fi while the camera was read" }
-    $n = [regex]::Match($text, 'new frames \d+: ([0-9.]+) fps, gaps > 50 ms ([0-9.]+) %.*longest gap ([0-9]+) ms')
-    if (-not $n.Success) {
-        $fail += "cannot parse vcamcheck output"
-    } else {
-        $newFps = [double]$n.Groups[1].Value
-        Write-Host ("over Wi-Fi: {0:N1} new fps of {1}, gaps > 50 ms {2} %, longest {3} ms" -f $newFps, $Fps, $n.Groups[2].Value, $n.Groups[3].Value)
-        # Shared CI runners are slow and noisy: this checks the path works, not its performance.
-        if ($newFps -lt $Fps * 0.5) { $fail += "only $newFps new fps over Wi-Fi (< half of $Fps)" }
-    }
+    # 3. Frames through the camera over Wi-Fi. Shared runners are slow and noisy, so this checks that
+    #    the encrypted path works and keeps up with the plain link, not absolute performance.
+    $wifiFps = Read-Camera "wifi"
+    Write-Host ("new fps: usb {0:N1}, wifi {1:N1}" -f $usbFps, $wifiFps)
+    if ($wifiFps -lt 1) { $fail += "no video over Wi-Fi ($wifiFps new fps)" }
+    elseif ($wifiFps -lt $usbFps * 0.5) { $fail += "Wi-Fi delivers $wifiFps new fps, under half the plain link's $usbFps" }
 } finally {
     Stop-Harness
 }
