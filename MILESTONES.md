@@ -17,7 +17,7 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 | M8 | Backlog | ⬜ |
 | M9 | Linux host | 🟨 agent, tray, packages done; real iPhone pairs over USB and streams over Wi-Fi; package install on a desktop and app checks pending |
 | M10 | Under-load performance + GPU path | ✅ Linux A/B; Windows load24 0–0.2 % frame loss through Frame Server |
-| M11 | Wireless (Wi-Fi) transport | 🟨 Linux verified with the real iPhone (pair over USB → Avahi → 1080p60 over Wi-Fi); Windows verified with fakephone; Windows with the phone, USB handover and latency vs USB pending |
+| M11 | Wireless (Wi-Fi) transport | 🟨 Linux verified with the real iPhone (pair over USB → Avahi → 1080p60 over Wi-Fi); Windows verified with fakephone, now in CI on every build (pair → Bonjour → encrypted 1080p30 through the vcam, Wi-Fi = plain link at 30.0 fps); Windows with the phone, USB handover and latency vs USB pending |
 
 ## M0: Foundations
 **Goal:** a project anyone can clone, understand and build.
