@@ -1,7 +1,12 @@
 #include "tethercam/usbmux.h"
 
+#include <algorithm>
+#include <atomic>
+#include <condition_variable>
 #include <cstdlib>
+#include <mutex>
 #include <string_view>
+#include <thread>
 
 #include "tethercam/bytes.h"
 #include "tethercam/version.h"
@@ -176,6 +181,43 @@ std::optional<Event> Client::NextEvent(int timeout_ms, bool& closed) {
     }
     return ParseEvent(*msg);
 }
+
+bool AnyUsbDevice() {
+    const auto devices = Client::ListDevices();
+    return devices && std::any_of(devices->begin(), devices->end(), [](const Device& d) { return d.connection_type == "USB"; });
+}
+
+struct UsbWatch::State {
+    std::mutex mu;
+    std::condition_variable cv;
+    bool stop = false;
+    std::atomic<bool> seen{false};
+};
+
+UsbWatch::UsbWatch(std::chrono::milliseconds interval, std::function<bool()> probe) : state_(std::make_shared<State>()) {
+    std::thread([st = state_, interval, probe = std::move(probe)] {
+        std::unique_lock lock(st->mu);
+        while (!st->cv.wait_for(lock, interval, [&] { return st->stop; })) {
+            lock.unlock();
+            const bool usb = probe();
+            lock.lock();
+            if (usb) {
+                st->seen = true;
+                return;
+            }
+        }
+    }).detach();
+}
+
+UsbWatch::~UsbWatch() {
+    {
+        std::lock_guard lock(state_->mu);
+        state_->stop = true;
+    }
+    state_->cv.notify_all();
+}
+
+bool UsbWatch::UsbSeen() const { return state_->seen; }
 
 const char* ToString(ConnectResult r) {
     switch (r) {

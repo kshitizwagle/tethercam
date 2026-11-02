@@ -3,6 +3,7 @@
 #include <sys/resource.h>
 
 #include <algorithm>
+#include <optional>
 #include <cstdlib>
 #include <format>
 
@@ -404,7 +405,9 @@ void Engine::RunSession(Link& link) {
     uint8_t camera_id = 0;
     auto last_rx = Clock::now();
     auto last_beat = Clock::now();
-    auto last_usb_check = Clock::now();
+    // Notices a USB cable during a Wi-Fi session; polls on its own thread so the session never waits on usbmuxd.
+    std::optional<usbmux::UsbWatch> usb_watch;
+    if (wifi && opt_.wifi.empty()) usb_watch.emplace(kUsbCheck);
     auto consumer_gone_since = Clock::time_point{};
     auto window_start = Clock::now();
     uint64_t window_bytes = 0, window_frames = 0;
@@ -616,14 +619,9 @@ void Engine::RunSession(Link& link) {
             log::Warn("no data from device for 3 s; reconnecting");
             break;
         }
-        if (wifi && opt_.wifi.empty() && now - last_usb_check >= kUsbCheck) {
-            last_usb_check = now;
-            const auto devices = usbmux::Client::ListDevices();
-            if (devices && std::any_of(devices->begin(), devices->end(),
-                                       [](const usbmux::Device& d) { return d.connection_type == "USB"; })) {
-                log::Info("iPhone connected by USB; switching from Wi-Fi");
-                break;
-            }
+        if (usb_watch && usb_watch->UsbSeen()) {
+            log::Info("iPhone connected by USB; switching from Wi-Fi");
+            break;
         }
 
         // 2. React to whether an app is reading the camera.

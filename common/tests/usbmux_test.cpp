@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
+#include <thread>
+
 #include "tethercam/formats.h"
 #include "tethercam/plist.h"
 #include "tethercam/usbmux.h"
@@ -173,4 +177,37 @@ TEST(Usbmux, RejectsBadServiceAddress) {
     EXPECT_FALSE(usbmux::ParseServiceAddress(":27015"));
     EXPECT_FALSE(usbmux::ParseServiceAddress("localhost:0"));
     EXPECT_FALSE(usbmux::ParseServiceAddress("localhost:70000"));
+}
+
+using namespace std::chrono_literals;
+
+TEST(UsbWatch, SeesUsbOnItsOwnThread) {
+    std::atomic<bool> plugged{false};
+    std::atomic<int> probes{0};
+    tethercam::usbmux::UsbWatch watch(10ms, [&] {
+        ++probes;
+        return plugged.load();
+    });
+    std::this_thread::sleep_for(50ms);
+    EXPECT_FALSE(watch.UsbSeen());
+    EXPECT_GT(probes.load(), 0);
+    plugged = true;
+    for (int i = 0; i < 200 && !watch.UsbSeen(); ++i) std::this_thread::sleep_for(5ms);
+    EXPECT_TRUE(watch.UsbSeen());
+}
+
+TEST(UsbWatch, NeverBlocksTheCaller) {
+    // A probe stuck like a refused loopback connect on Windows (~2 s): asking and destroying stay instant.
+    std::atomic<bool> in_probe{false};
+    const auto start = std::chrono::steady_clock::now();
+    {
+        tethercam::usbmux::UsbWatch watch(1ms, [&] {
+            in_probe = true;
+            std::this_thread::sleep_for(500ms);
+            return true;
+        });
+        while (!in_probe) std::this_thread::sleep_for(1ms);
+        EXPECT_FALSE(watch.UsbSeen());
+    }
+    EXPECT_LT(std::chrono::steady_clock::now() - start, 250ms);
 }

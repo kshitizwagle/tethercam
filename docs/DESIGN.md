@@ -90,7 +90,7 @@ validation of that change remains pending in [perf.md](perf.md).
 | Thread | Job |
 |---|---|
 | UI thread | Message loop, tray icon and menu (`agent/tray.cpp`). Refreshed by `PostMessage` from the engine |
-| Engine thread | `agent/engine.cpp`: device discovery, the protocol session, H.264 decode, scaling and the shm writer, all in one loop that polls the socket every 20 ms. Sessions run over a `Link`: plain for USB/`--tcp`, `SecureLink` for Wi-Fi. With no USB phone it tries paired phones over Wi-Fi every 3 s (700 ms connect timeout per address); during a Wi-Fi session it checks usbmuxd every 2 s and drops Wi-Fi when a USB phone appears |
+| Engine thread | `agent/engine.cpp`: device discovery, the protocol session, H.264 decode, scaling and the shm writer, all in one loop that polls the socket every 20 ms. Sessions run over a `Link`: plain for USB/`--tcp`, `SecureLink` for Wi-Fi. With no USB phone it tries paired phones over Wi-Fi every 3 s (700 ms connect timeout per address); during a Wi-Fi session a `usbmux::UsbWatch` thread checks usbmuxd every 2 s and the loop drops Wi-Fi when it reports a USB phone (off the loop because a refused loopback connect takes ~2 s on Windows) |
 | DNS client callbacks | `agent/discovery.cpp`: `DnsServiceBrowse`/`DnsServiceResolve` results for `_tethercam._tcp`, started once a phone is paired; the engine reads a mutex-protected list |
 | Status accept thread | Loopback HTTP requests and SSE subscriptions (`agent/status_server.cpp`) |
 | Status keepalive thread | Sends SSE keepalive comments every 15 seconds |

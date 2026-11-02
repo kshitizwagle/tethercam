@@ -3,7 +3,10 @@
 // Client for Apple's usbmuxd (Apple Mobile Device Service), which tunnels TCP
 // connections to an iPhone over USB. See docs/TECH_SPEC.md §4.
 
+#include <chrono>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -79,6 +82,26 @@ public:
 
 private:
     net::Socket sock_;
+};
+
+// True when usbmuxd lists a device connected by USB (not over the network).
+bool AnyUsbDevice();
+
+// Runs `probe` every `interval` on its own thread and remembers when it first returned true. Used during
+// Wi-Fi sessions to notice a USB cable without stalling the session: a refused loopback connect takes
+// ~2 s on Windows when usbmuxd isn't running, and a stuck usbmuxd never answers. The destructor doesn't
+// wait for a probe in progress; the thread finishes it and exits on its own.
+class UsbWatch {
+public:
+    explicit UsbWatch(std::chrono::milliseconds interval, std::function<bool()> probe = AnyUsbDevice);
+    ~UsbWatch();
+    UsbWatch(const UsbWatch&) = delete;
+    UsbWatch& operator=(const UsbWatch&) = delete;
+    bool UsbSeen() const;
+
+private:
+    struct State;
+    std::shared_ptr<State> state_;
 };
 
 const char* ToString(ConnectResult r);
