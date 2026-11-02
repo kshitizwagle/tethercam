@@ -20,6 +20,10 @@ jobs:
         run: ctest --test-dir build/vs2026-x64 -C Debug --output-on-failure
       - name: Build (Release)
         run: cmake --build build/vs2026-x64 --config Release
+      - name: Wi-Fi smoke test (fakephone)
+        # Pair over the stand-in USB link, then stream over encrypted Wi-Fi through the in-process camera.
+        shell: pwsh
+        run: ./windows/scripts/wifi-smoke.ps1 -Build build/vs2026-x64 -Configuration Release
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
