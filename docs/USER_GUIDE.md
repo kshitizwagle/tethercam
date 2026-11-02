@@ -225,8 +225,8 @@ Logs: tray → **Open log folder** (`%LOCALAPPDATA%\Tethercam\logs\agent.log`).
 
 ## FAQ
 
-**Does it work over Wi-Fi?** Yes, optionally (new; not yet verified with a real iPhone, so treat it as
-beta). In the iPhone app tap the Wi-Fi button at the top, turn on **Wireless** and allow Local Network
+**Does it work over Wi-Fi?** Yes, optionally (beta: verified with a real iPhone on Linux, not yet on
+Windows). In the iPhone app tap the Wi-Fi button at the top, turn on **Wireless** and allow Local Network
 access, then connect the phone to the PC with the cable once while Tethercam is open: the PC pairs on its
 own. From then on, whenever the cable is unplugged and both are on the same network, the PC connects over
 Wi-Fi (the tray shows "(Wi-Fi)"). Plugging the cable back in switches to USB. Over Wi-Fi, Auto quality

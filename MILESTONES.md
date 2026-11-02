@@ -15,9 +15,9 @@ iPhone; "admin" = needs the camera registered machine-wide (elevated install).
 | M6 | Robustness | 🟨 lock/unlock + replug + lens restore verified on device; sleep/resume, 1 h soak pending |
 | M7 | Release v0.1 | ✅ every green main build publishes MSI + IPA as Latest; AltStore source auto-updated |
 | M8 | Backlog | ⬜ |
-| M9 | Linux host | 🟨 agent, tray, packages done and verified with fakephone; package install and real iPhone pending |
+| M9 | Linux host | 🟨 agent, tray, packages done; real iPhone pairs over USB and streams over Wi-Fi; package install on a desktop and app checks pending |
 | M10 | Under-load performance + GPU path | ✅ Linux A/B; Windows load24 0–0.2 % frame loss through Frame Server |
-| M11 | Wireless (Wi-Fi) transport | 🟨 Windows side verified with fakephone (pair → Bonjour → encrypted 1080p30 through the vcam); Linux + iOS written, need CI; real iPhone pending |
+| M11 | Wireless (Wi-Fi) transport | 🟨 Linux verified with the real iPhone (pair over USB → Avahi → 1080p60 over Wi-Fi); Windows verified with fakephone; Windows with the phone, USB handover and latency vs USB pending |
 
 ## M0: Foundations
 **Goal:** a project anyone can clone, understand and build.
@@ -126,8 +126,8 @@ the default (TECH_SPEC §14, PROTOCOL § Wireless transport).
 - [x] Monocypher vendored; sessions run over a `Link` on both hosts with no behavior change (Windows tests green; Linux needs CI)
 - [x] Noise NNpsk0 sessions + encrypted records pass the published Noise vector (C++ and Swift) and fuzz tests; fakephone → agent over Wi-Fi streams on Windows (fakephone; Linux not built here)
 - [x] `WifiPair` over `--tcp` stores the key on the PC (DPAPI) and in fakephone; an unpaired host or wrong key is refused (fakephone; Keychain side needs the device)
-- [ ] Bonjour discovery (Windows DnsServiceBrowse, Linux Avahi) + manual address; USB preferred and taken over mid-session (F12) (written; Windows discovery verified with `fakephone --advertise`; Avahi and USB takeover unverified)
+- [ ] Bonjour discovery (Windows DnsServiceBrowse, Linux Avahi) + manual address; USB preferred and taken over mid-session (F12) (written; Windows discovery verified with `fakephone --advertise`, Avahi with the real iPhone; USB takeover unverified)
 - [ ] Tray/GTK: paired phone, editable address, Forget; Status API `transport` field (built; `transport` verified; menus not yet clicked by eye)
-- [ ] iOS: Wireless toggle, Wi-Fi listener + Bonjour, `WifiPair` handling, paired PCs with Forget, Keychain store, Local Network permission (Mac/CI) (written; Noise/WifiChannel compiled and checked with swiftc here; app build pending in CI)
+- [ ] iOS: Wireless toggle, Wi-Fi listener + Bonjour, `WifiPair` handling, paired PCs with Forget, Keychain store, Local Network permission (Mac/CI) (built in CI and with xtool; installed on the iPhone 15 Pro Max and used for the Linux Wi-Fi test; Forget and Wireless off not yet tried)
 - [ ] Real iPhone over Wi-Fi: pair over USB, unplug, 1080p30/60, USB handover, latency and frame loss vs USB in `docs/perf.md` (device)
 - [x] USER_GUIDE, README, STATUS_API, DESIGN and CONTRIBUTING updated (Wi-Fi marked as not yet verified with a real iPhone)
