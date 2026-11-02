@@ -9,8 +9,9 @@ and the Camera app can use. No account, no watermark, no overlays: plug in the c
 **Tethercam (Windows Virtual Camera)**. Optionally, pair once over the cable and use it over Wi-Fi.
 
 > **Status: beta.** Works end to end with a real iPhone 15 Pro Max: 1080p30/60 and 4K30 through the
-> Windows camera stack, ~100 ms glass-to-glass latency at 1080p30, hardware encode and decode.
-> See [MILESTONES.md](MILESTONES.md) for what's still open.
+> Windows camera stack, ~100 ms glass-to-glass latency at 1080p30, hardware encode and decode. On Linux
+> the same iPhone pairs over USB and streams 1080p60 over Wi-Fi. See [MILESTONES.md](MILESTONES.md) for
+> what's still open.
 
 ## Get started
 
@@ -38,11 +39,11 @@ Full instructions: **[User guide](docs/USER_GUIDE.md)**. Streaming and call apps
 - Capture quality on both apps: Auto, 1080p30/60 or 4K30/60, synchronized and remembered per phone/PC
 - iPhone app styled like the Camera app; on Windows, a tray icon and a live Tethercam window with the same controls
 - Picture stays upright whichever way the phone is held; mirror and rotate on top
-- The phone camera only runs while something is using it; lens and settings are remembered
+- The phone camera only runs while something is using it; lens, mirror and quality are remembered
 - Outputs black (not a message) while offline, plus a local [status API](docs/STATUS_API.md) so stream
   overlays can show their own "camera off" design
-- No internet traffic: USB by default; optional Wi-Fi (new, not yet verified with a real iPhone) only to
-  PCs paired over the cable, encrypted end to end (Noise, Monocypher)
+- No internet traffic: USB by default; optional Wi-Fi only to PCs paired over the cable, encrypted end
+  to end (Noise, Monocypher). Verified with a real iPhone on Linux; Windows with a real phone still pending
 - Linux: a v4l2loopback camera for browsers, Zoom, OBS and others, VA-API hardware decode, tray icon,
   the same status API (`.deb` for Ubuntu 24.04/26.04, `.rpm` for Fedora)
 
